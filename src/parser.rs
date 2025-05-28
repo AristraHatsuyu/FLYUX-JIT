@@ -193,103 +193,63 @@ fn parse_stmt(tokens: &[Token], index: &mut usize) -> Stmt {
 
         // 处理 elif 和 else 分支
         loop {
-            if let Some(Token { kind: TokenKind::Ident(id), .. }) = tokens.get(*index) {
-                if id == "elif" {
-                    *index += 1;
-                    if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::LParen, .. })) {
-                        panic!(
-                            "Parse error at line {}, col {}: Expected '(' after elif",
-                            tokens[*index].line,
-                            tokens[*index].col
-                        );
-                    }
-                    *index += 1;
-                    let cond = parse_binary_expr(tokens, index);
-                    if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RParen, .. })) {
-                        panic!(
-                            "Parse error at line {}, col {}: Expected ')' after elif condition",
-                            tokens[*index].line,
-                            tokens[*index].col
-                        );
-                    }
-                    *index += 1;
-
-                    if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::LBrace, .. })) {
-                        panic!(
-                            "Parse error at line {}, col {}: Expected '{{' after elif condition",
-                            tokens[*index].line,
-                            tokens[*index].col
-                        );
-                    }
-                    *index += 1;
-
-                    let mut body = Vec::new();
-                    while !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RBrace, .. })) {
-                        body.push(parse_stmt(tokens, index));
-                    }
-                    *index += 1;
-
-                    branches.push((Some(cond), body));
-                } else if id == "else" {
-                    *index += 1;
-                    if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::LBrace, .. })) {
-                        panic!(
-                            "Parse error at line {}, col {}: Expected '{{' after else",
-                            tokens[*index].line,
-                            tokens[*index].col
-                        );
-                    }
-                    *index += 1;
-
-                    let mut body = Vec::new();
-                    while !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RBrace, .. })) {
-                        body.push(parse_stmt(tokens, index));
-                    }
-                    *index += 1;
-
-                    branches.push((None, body));
-                    break;
-                } else if matches!(tokens.get(*index), Some(Token { kind: TokenKind::LParen, .. })) {
-                    *index += 1;
-                    let cond = parse_binary_expr(tokens, index);
-                    if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RParen, .. })) {
-                        panic!(
-                            "Parse error at line {}, col {}: Expected ')' after condition",
-                            tokens[*index].line,
-                            tokens[*index].col
-                        );
-                    }
-                    *index += 1;
-
-                    if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::LBrace, .. })) {
-                        panic!(
-                            "Parse error at line {}, col {}: Expected '{{' after condition",
-                            tokens[*index].line,
-                            tokens[*index].col
-                        );
-                    }
-                    *index += 1;
-
-                    let mut body = Vec::new();
-                    while !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RBrace, .. })) {
-                        body.push(parse_stmt(tokens, index));
-                    }
-                    *index += 1;
-
-                    branches.push((Some(cond), body));
-                } else if matches!(tokens.get(*index), Some(Token { kind: TokenKind::LBrace, .. })) {
-                    *index += 1;
-                    let mut body = Vec::new();
-                    while !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RBrace, .. })) {
-                        body.push(parse_stmt(tokens, index));
-                    }
-                    *index += 1;
-                    branches.push((None, body));
-                    break;
-                } else {
-                    break;
+            if let Some(Token { kind: TokenKind::Elif, .. }) = tokens.get(*index) {
+                *index += 1;
+                if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::LParen, .. })) {
+                    panic!(
+                        "Parse error at line {}, col {}: Expected '(' after elif",
+                        tokens[*index].line,
+                        tokens[*index].col
+                    );
                 }
+                *index += 1;
+                let cond = parse_binary_expr(tokens, index);
+                if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RParen, .. })) {
+                    panic!(
+                        "Parse error at line {}, col {}: Expected ')' after elif condition",
+                        tokens[*index].line,
+                        tokens[*index].col
+                    );
+                }
+                *index += 1;
+
+                if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::LBrace, .. })) {
+                    panic!(
+                        "Parse error at line {}, col {}: Expected '{{' after elif condition",
+                        tokens[*index].line,
+                        tokens[*index].col
+                    );
+                }
+                *index += 1;
+
+                let mut body = Vec::new();
+                while !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RBrace, .. })) {
+                    body.push(parse_stmt(tokens, index));
+                }
+                *index += 1;
+
+                branches.push((Some(cond), body));
+            } else if let Some(Token { kind: TokenKind::Else, .. }) = tokens.get(*index) {
+                *index += 1;
+                if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::LBrace, .. })) {
+                    panic!(
+                        "Parse error at line {}, col {}: Expected '{{' after else",
+                        tokens[*index].line,
+                        tokens[*index].col
+                    );
+                }
+                *index += 1;
+
+                let mut body = Vec::new();
+                while !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RBrace, .. })) {
+                    body.push(parse_stmt(tokens, index));
+                }
+                *index += 1;
+
+                branches.push((None, body));
+                break;
             } else if matches!(tokens.get(*index), Some(Token { kind: TokenKind::LParen, .. })) {
+                // 原始简洁写法
                 *index += 1;
                 let cond = parse_binary_expr(tokens, index);
                 if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RParen, .. })) {

@@ -33,6 +33,7 @@ pub enum TokenKind {
     Unknown(char),
 
     If,
+    Elif,
     Else,
 }
 
@@ -207,6 +208,7 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                         else { tokens.push(Token { kind: TokenKind::Ident(ident), line: token_line, col: token_col }); }
                     }
                     "if" => tokens.push(Token { kind: TokenKind::If, line: token_line, col: token_col }),
+                    "elif" => tokens.push(Token { kind: TokenKind::Elif, line: token_line, col: token_col }),
                     "else" => tokens.push(Token { kind: TokenKind::Else, line: token_line, col: token_col }),
                     _ => tokens.push(Token { kind: TokenKind::Ident(ident), line: token_line, col: token_col }),
                 }

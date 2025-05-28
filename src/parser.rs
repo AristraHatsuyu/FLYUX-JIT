@@ -1,0 +1,459 @@
+use crate::lexer::{Token, TokenKind};
+use crate::ast::{Expr, Stmt, Function};
+
+pub fn parse(tokens: &[Token]) -> Vec<Function> {
+    let mut index = 0;
+    let mut fns = Vec::new();
+
+    while index < tokens.len() {
+        if matches!(tokens.get(index), Some(Token { kind: TokenKind::Fn, .. })) {
+            index += 1;
+
+            let name = match tokens.get(index) {
+                Some(Token { kind: TokenKind::Ident(id), .. }) => id.clone(),
+                _ => panic!(
+                    "Parse error at line {}, col {}: Expected function name",
+                    tokens[index].line,
+                    tokens[index].col
+                ),
+            };
+            index += 1;
+
+            let mut params = Vec::new();
+            if matches!(tokens.get(index), Some(Token { kind: TokenKind::LParen, .. })) {
+                index += 1;
+                while !matches!(tokens.get(index), Some(Token { kind: TokenKind::RParen, .. })) {
+                    let param_name = match tokens.get(index) {
+                        Some(Token { kind: TokenKind::Ident(p), .. }) => p.clone(),
+                        _ => panic!(
+                            "Parse error at line {}, col {}: Expected parameter name",
+                            tokens[index].line,
+                            tokens[index].col
+                        ),
+                    };
+                    index += 1;
+
+                    let mut param_type = None;
+                    if matches!(tokens.get(index), Some(Token { kind: TokenKind::LParen, .. })) {
+                        index += 1;
+                        param_type = match tokens.get(index) {
+                            Some(Token { kind: TokenKind::Ident(t), .. }) => Some(t.clone()),
+                            _ => panic!(
+                                "Parse error at line {}, col {}: Expected type after (",
+                                tokens[index].line,
+                                tokens[index].col
+                            ),
+                        };
+                        index += 1;
+                        if !matches!(tokens.get(index), Some(Token { kind: TokenKind::RParen, .. })) {
+                            panic!(
+                                "Parse error at line {}, col {}: Expected ) after type",
+                                tokens[index].line,
+                                tokens[index].col
+                            );
+                        }
+                        index += 1;
+                    }
+
+                    params.push((param_name, param_type));
+                    if matches!(tokens.get(index), Some(Token { kind: TokenKind::Comma, .. })) {
+                        index += 1;
+                    }
+                }
+                index += 1; // skip RParen
+            }
+
+            while !matches!(tokens.get(index), Some(Token { kind: TokenKind::LBrace, .. })) {
+                index += 1;
+            }
+            index += 1;
+
+            let mut body = Vec::new();
+            while !matches!(tokens.get(index), Some(Token { kind: TokenKind::RBrace, .. })) {
+                body.push(parse_stmt(tokens, &mut index));
+            }
+            index += 1;
+
+            fns.push(Function { name, params, body });
+        } else {
+            index += 1;
+        }
+    }
+
+    fns
+}
+
+fn parse_stmt(tokens: &[Token], index: &mut usize) -> Stmt {
+    // 跳过注释和空白 token
+    loop {
+        match tokens.get(*index) {
+            Some(Token { kind: TokenKind::Comment(_), .. }) |
+            Some(Token { kind: TokenKind::Whitespace, .. }) => {
+                *index += 1;
+            }
+            _ => break,
+        }
+    }
+    if let Some(Token { kind: TokenKind::Return, .. }) = tokens.get(*index) {
+        *index += 1;
+        let expr = parse_binary_expr(tokens, index);
+        // println!("Return 表达式结构：{:?}", expr);
+        return Stmt::Return(expr);
+    }
+
+    if let Some(Token { kind: TokenKind::Loop, .. }) = tokens.get(*index) {
+        *index += 1;
+        let var = match tokens.get(*index) {
+            Some(Token { kind: TokenKind::Ident(v), .. }) => v.clone(),
+            _ => panic!(
+                "Parse error at line {}, col {}: Expected loop variable",
+                tokens[*index].line,
+                tokens[*index].col
+            ),
+        };
+        *index += 1;
+
+        if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::LBracket, .. })) {
+            panic!(
+                "Parse error at line {}, col {}: Expected [ after loop var",
+                tokens[*index].line,
+                tokens[*index].col
+            );
+        }
+        *index += 1;
+        let expr = parse_binary_expr(tokens, index);
+        if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RBracket, .. })) {
+            panic!(
+                "Parse error at line {}, col {}: Expected ] after loop expr",
+                tokens[*index].line,
+                tokens[*index].col
+            );
+        }
+        *index += 1;
+
+        if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::LBrace, .. })) {
+            panic!(
+                "Parse error at line {}, col {}: Expected '{{' after loop",
+                tokens[*index].line,
+                tokens[*index].col
+            );
+        }
+        *index += 1;
+
+        let mut body = Vec::new();
+        while !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RBrace, .. })) {
+            body.push(parse_stmt(tokens, index));
+        }
+        *index += 1;
+
+        return Stmt::Loop(var, expr, body);
+    }
+
+    if let Some(Token { kind: TokenKind::If, .. }) = tokens.get(*index) {
+        *index += 1;
+
+        let mut branches = Vec::new();
+
+        loop {
+            if matches!(tokens.get(*index), Some(Token { kind: TokenKind::LParen, .. })) {
+                *index += 1;
+                let cond = parse_binary_expr(tokens, index);
+                if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RParen, .. })) {
+                    panic!(
+                        "Parse error at line {}, col {}: Expected ')' after if condition",
+                        tokens[*index].line,
+                        tokens[*index].col
+                    );
+                }
+                *index += 1;
+
+                if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::LBrace, .. })) {
+                    panic!(
+                        "Parse error at line {}, col {}: Expected '{{' after condition",
+                        tokens[*index].line,
+                        tokens[*index].col
+                    );
+                }
+                *index += 1;
+
+                let mut body = Vec::new();
+                while !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RBrace, .. })) {
+                    body.push(parse_stmt(tokens, index));
+                }
+                *index += 1;
+
+                branches.push((Some(cond), body));
+            } else if matches!(tokens.get(*index), Some(Token { kind: TokenKind::LBrace, .. })) {
+                *index += 1;
+                let mut body = Vec::new();
+                while !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RBrace, .. })) {
+                    body.push(parse_stmt(tokens, index));
+                }
+                *index += 1;
+                branches.push((None, body));
+                break;
+            } else {
+                break;
+            }
+        }
+
+        return Stmt::MultiIf(branches);
+    }
+
+    // ✅ 优先识别函数调用语句
+    if let Some(Token { kind: TokenKind::Ident(id), .. }) = tokens.get(*index) {
+        if matches!(tokens.get(*index + 1), Some(Token { kind: TokenKind::LParen, .. })) {
+            let id = id.clone();
+            *index += 1;
+            let args = parse_call_args(tokens, index);
+            return Stmt::Expr(Expr::Call(id, args));
+        }
+    }
+
+    // ✅ 变量/常量定义语句和普通变量赋值
+    if let Some(Token { kind: TokenKind::Ident(name), .. }) = tokens.get(*index) {
+        let name = name.clone();
+        *index += 1;
+
+        let mut var_type = None;
+
+        if matches!(tokens.get(*index), Some(Token { kind: TokenKind::LParen, .. })) {
+            *index += 1;
+            var_type = match tokens.get(*index) {
+                Some(Token { kind: TokenKind::Ident(t), .. }) => Some(t.clone()),
+                _ => panic!(
+                    "Parse error at line {}, col {}: Expected type inside ()",
+                    tokens[*index].line,
+                    tokens[*index].col
+                ),
+            };
+            *index += 1;
+            if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RParen, .. })) {
+                panic!(
+                    "Parse error at line {}, col {}: Expected )",
+                    tokens[*index].line,
+                    tokens[*index].col
+                );
+            }
+            *index += 1;
+        } else if matches!(tokens.get(*index), Some(Token { kind: TokenKind::LBracket, .. })) {
+            *index += 1;
+            var_type = match tokens.get(*index) {
+                Some(Token { kind: TokenKind::Ident(t), .. }) => Some(t.clone()),
+                _ => panic!(
+                    "Parse error at line {}, col {}: Expected type inside []",
+                    tokens[*index].line,
+                    tokens[*index].col
+                ),
+            };
+            *index += 1;
+            if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RBracket, .. })) {
+                panic!(
+                    "Parse error at line {}, col {}: Expected ]",
+                    tokens[*index].line,
+                    tokens[*index].col
+                );
+            }
+            *index += 1;
+        }
+
+        if matches!(tokens.get(*index), Some(Token { kind: TokenKind::Assign, .. })) {
+            *index += 1;
+            let expr = parse_binary_expr(tokens, index);
+            return Stmt::ConstDecl(name, var_type, expr);
+        } else if matches!(tokens.get(*index), Some(Token { kind: TokenKind::Unknown(':'), .. })) {
+            *index += 1;
+            if matches!(tokens.get(*index), Some(Token { kind: TokenKind::LParen, .. })) {
+                // 常量: (type) = val
+                *index += 1;
+                let const_type = match tokens.get(*index) {
+                    Some(Token { kind: TokenKind::Ident(t), .. }) => Some(t.clone()),
+                    _ => panic!(
+                        "Parse error at line {}, col {}: Expected type after :(",
+                        tokens[*index].line,
+                        tokens[*index].col
+                    ),
+                };
+                *index += 1;
+                if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RParen, .. })) {
+                    panic!(
+                        "Parse error at line {}, col {}: Expected ) after constant type",
+                        tokens[*index].line,
+                        tokens[*index].col
+                    );
+                }
+                *index += 1;
+                if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::Eq, .. })) {
+                    panic!(
+                        "Parse error at line {}, col {}: Expected = after constant type",
+                        tokens[*index].line,
+                        tokens[*index].col
+                    );
+                }
+                *index += 1;
+                let expr = parse_binary_expr(tokens, index);
+                return Stmt::ConstDecl(name, const_type, expr);
+            } else if matches!(tokens.get(*index), Some(Token { kind: TokenKind::LBracket, .. })) {
+                // 变量: [type] = val
+                *index += 1;
+                let var_type = match tokens.get(*index) {
+                    Some(Token { kind: TokenKind::Ident(t), .. }) => Some(t.clone()),
+                    _ => panic!(
+                        "Parse error at line {}, col {}: Expected type after :[",
+                        tokens[*index].line,
+                        tokens[*index].col
+                    ),
+                };
+                *index += 1;
+                if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RBracket, .. })) {
+                    panic!(
+                        "Parse error at line {}, col {}: Expected ] after variable type",
+                        tokens[*index].line,
+                        tokens[*index].col
+                    );
+                }
+                *index += 1;
+                if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::Eq, .. })) {
+                    panic!(
+                        "Parse error at line {}, col {}: Expected = after variable type",
+                        tokens[*index].line,
+                        tokens[*index].col
+                    );
+                }
+                *index += 1;
+                let expr = parse_binary_expr(tokens, index);
+                return Stmt::VarDecl(name, var_type, expr);
+            } else {
+                panic!(
+                    "Parse error at line {}, col {}: Expected type declaration in :()",
+                    tokens[*index].line,
+                    tokens[*index].col
+                );
+            }
+        } else if matches!(tokens.get(*index), Some(Token { kind: TokenKind::Eq, .. })) {
+            // 普通变量赋值（允许 a = 加法🧮(a, b)）
+            *index += 1;
+            let expr = parse_binary_expr(tokens, index);
+            return Stmt::Assign(name, expr);
+        } else {
+            println!("当前 Token：{:?}", tokens.get(*index));
+            panic!(
+                "Parse error at line {}, col {}: Expected := after variable name",
+                tokens[*index].line,
+                tokens[*index].col
+            );
+        }
+    }
+
+    panic!(
+        "Parse error at line {}, col {}: Unknown statement",
+        tokens[*index].line,
+        tokens[*index].col
+    )
+}
+
+fn parse_binary_expr(tokens: &[Token], index: &mut usize) -> Expr {
+    // 支持多重比较和多重等式判断 a > b > c, a = b = c, a < b < c
+    let mut exprs = Vec::new();
+    let mut ops = Vec::new();
+
+    exprs.push(parse_expr(tokens, index));
+
+    while let Some(op_token) = tokens.get(*index) {
+        let op_str = match op_token {
+            Token { kind: TokenKind::Unknown('+'), .. } => "+",
+            Token { kind: TokenKind::Unknown('-'), .. } => "-",
+            Token { kind: TokenKind::Unknown('*'), .. } => "*",
+            Token { kind: TokenKind::Unknown('/'), .. } => "/",
+            Token { kind: TokenKind::Unknown('>'), .. } => ">",
+            Token { kind: TokenKind::Unknown('<'), .. } => "<",
+            Token { kind: TokenKind::Eq, .. } => "=",
+            _ => break,
+        }.to_string();
+
+        *index += 1;
+        let next_expr = parse_expr(tokens, index);
+
+        // 链式比较符（> < =），累积表达式，等会用逻辑与连接
+        if op_str == ">" || op_str == "<" || op_str == "=" {
+            exprs.push(next_expr);
+            ops.push(op_str);
+        } else {
+            // 普通算术二元操作：构造二元表达式
+            let left = exprs.pop().unwrap();
+            exprs.push(Expr::Binary(Box::new(left), op_str, Box::new(next_expr)));
+        }
+    }
+
+    // 没有链式比较，直接返回最后表达式
+    if ops.is_empty() {
+        return exprs.pop().unwrap();
+    }
+
+    // 构造链式比较逻辑 ((a > b) && (b > c)) 的结构
+    let mut result = Expr::Binary(Box::new(exprs[0].clone()), ops[0].clone(), Box::new(exprs[1].clone()));
+    for i in 1..ops.len() {
+        let cmp = Expr::Binary(Box::new(exprs[i].clone()), ops[i].clone(), Box::new(exprs[i + 1].clone()));
+        result = Expr::Logical("&&".to_string(), Box::new(result), Box::new(cmp));
+    }
+    result
+}
+
+fn parse_expr(tokens: &[Token], index: &mut usize) -> Expr {
+    match tokens.get(*index) {
+        Some(Token { kind: TokenKind::Number(n), .. }) => {
+            *index += 1;
+            Expr::Number(*n)
+        }
+        Some(Token { kind: TokenKind::Str(s), .. }) => {
+            *index += 1;
+            Expr::Str(s.clone())
+        }
+        Some(Token { kind: TokenKind::LBracket, .. }) => {
+            *index += 1;
+            let mut elements = Vec::new();
+            while !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RBracket, .. })) {
+                elements.push(parse_binary_expr(tokens, index));
+                if matches!(tokens.get(*index), Some(Token { kind: TokenKind::Comma, .. })) {
+                    *index += 1;
+                }
+            }
+            *index += 1;
+            Expr::Array(elements)
+        }
+        Some(Token { kind: TokenKind::Ident(id), .. }) => {
+            let id = id.clone();
+            *index += 1;
+            if matches!(tokens.get(*index), Some(Token { kind: TokenKind::LParen, .. })) {
+                let args = parse_call_args(tokens, index);
+                Expr::Call(id, args)
+            } else if matches!(tokens.get(*index), Some(Token { kind: TokenKind::LBracket, .. })) {
+                *index += 1;
+                let idx = parse_binary_expr(tokens, index);
+                if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RBracket, .. })) {
+                    panic!("Parse error: Expected closing bracket ] for array index");
+                }
+                *index += 1;
+                Expr::Index(Box::new(Expr::Ident(id)), Box::new(idx))
+            } else {
+                Expr::Ident(id)
+            }
+        }
+        _ => panic!("Unsupported expression"),
+    }
+}
+
+fn parse_call_args(tokens: &[Token], index: &mut usize) -> Vec<Expr> {
+    let mut args = Vec::new();
+    if matches!(tokens.get(*index), Some(Token { kind: TokenKind::LParen, .. })) {
+        *index += 1;
+        while !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RParen, .. })) {
+            args.push(parse_binary_expr(tokens, index));
+            if matches!(tokens.get(*index), Some(Token { kind: TokenKind::Comma, .. })) {
+                *index += 1;
+            }
+        }
+        *index += 1;
+    }
+    args
+}

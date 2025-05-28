@@ -15,20 +15,12 @@ pub fn execute_file(path: &str) {
             let tokens = tokenize(&content);
             let ast = parse(&tokens);
 
-            /*
-            println!("Parsed functions:");
-            for f in &ast {
-                println!("- {}", f.name);
-            }
-            */
-
             let mut function_table: HashMap<String, &Function> = HashMap::new();
             for f in &ast {
                 function_table.insert(f.name.clone(), f);
             }
 
             if let Some(main_fn) = function_table.get("main") {
-                // println!("Executing main()...");
                 let mut ctx = HashMap::new();
                 exec_with_ctx(main_fn, &mut ctx, &function_table);
             }
@@ -369,7 +361,6 @@ fn eval_expr(
                 _ => panic!("Unsupported logical operator: {}", op),
             }
         }
-        // ---- 新增数组表达式支持 ----
         Expr::Array(elements) => {
             let values: Vec<String> = elements.iter().map(|e| eval_expr(e, ctx, fns)).collect();
             format!("[{}]", values.join(","))
@@ -385,6 +376,31 @@ fn eval_expr(
             }
             elements[idx].to_string()
         }
+        Expr::Access(obj_expr, prop) => {
+            let obj_str = eval_expr(obj_expr, ctx, fns);
+            if obj_str.starts_with('{') && obj_str.ends_with('}') {
+                let inner = &obj_str[1..obj_str.len()-1];
+                let pairs: HashMap<_, _> = inner.split(',').filter_map(|entry| {
+                    let mut parts = entry.splitn(2, ':');
+                    let key = parts.next()?.trim().trim_matches('"');
+                    let val = parts.next()?.trim();
+                    Some((key.to_string(), val.to_string()))
+                }).collect();
+                if let Some(value) = pairs.get(prop) {
+                    value.clone()
+                } else {
+                    panic!("Property '{}' not found in object", prop)
+                }
+            } else {
+                panic!("Not an object: {}", obj_str)
+            }
+        }
+        Expr::Object(pairs) => {
+            let kvs: Vec<String> = pairs.iter()
+                .map(|(k, v)| format!("\"{}\":{}", k, eval_expr(v, ctx, fns)))
+                .collect();
+            format!("{{{}}}", kvs.join(","))
+        }
     }
 }
 
@@ -396,6 +412,8 @@ fn infer_type(val: &str) -> Option<String> {
     } else if val.to_lowercase() == "true" || val.to_lowercase() == "false" {
         Some("bool".to_string())
     } else if val.trim().starts_with('[') && val.trim().ends_with(']') {
+        Some("obj".to_string())
+    } else if val.trim().starts_with('{') && val.trim().ends_with('}') {
         Some("obj".to_string())
     } else {
         Some("string".to_string())

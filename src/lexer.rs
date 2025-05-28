@@ -21,6 +21,9 @@ pub enum TokenKind {
     LBracket, RBracket,
     Comma, Eq,
 
+    Colon,
+    Dot,
+
     Ident(String),
     Number(f64),
     Str(String),
@@ -78,7 +81,7 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                     col += 1;
                     tokens.push(Token { kind: TokenKind::Assign, line: token_line, col: token_col });
                 } else {
-                    tokens.push(Token { kind: TokenKind::Unknown(':'), line: token_line, col: token_col });
+                    tokens.push(Token { kind: TokenKind::Colon, line: token_line, col: token_col });
                 }
             }
             '<' => {
@@ -105,6 +108,8 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                     chars.next();
                     col += 1;
                     tokens.push(Token { kind: TokenKind::Pipe, line: token_line, col: token_col });
+                } else {
+                    tokens.push(Token { kind: TokenKind::Dot, line: token_line, col: token_col });
                 }
             }
             '+' => { tokens.push(Token { kind: TokenKind::Unknown('+'), line: token_line, col: token_col }); chars.next(); col += 1; },

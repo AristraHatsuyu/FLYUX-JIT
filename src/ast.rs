@@ -10,7 +10,6 @@ pub enum Expr {
     Index(Box<Expr>, Box<Expr>),
     Object(Vec<(String, Box<Expr>)>),
     Access(Box<Expr>, String),
-    Index(Box<Expr>, Box<Expr>),
 }
 
 #[derive(Debug, Clone)]

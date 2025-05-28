@@ -102,51 +102,7 @@ fn parse_stmt(tokens: &[Token], index: &mut usize) -> Stmt {
     }
 
     if let Some(Token { kind: TokenKind::Loop, .. }) = tokens.get(*index) {
-        *index += 1;
-        let var = match tokens.get(*index) {
-            Some(Token { kind: TokenKind::Ident(v), .. }) => v.clone(),
-            _ => panic!(
-                "Parse error at line {}, col {}: Expected loop variable",
-                tokens[*index].line,
-                tokens[*index].col
-            ),
-        };
-        *index += 1;
-
-        if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::LBracket, .. })) {
-            panic!(
-                "Parse error at line {}, col {}: Expected [ after loop var",
-                tokens[*index].line,
-                tokens[*index].col
-            );
-        }
-        *index += 1;
-        let expr = parse_binary_expr(tokens, index);
-        if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RBracket, .. })) {
-            panic!(
-                "Parse error at line {}, col {}: Expected ] after loop expr",
-                tokens[*index].line,
-                tokens[*index].col
-            );
-        }
-        *index += 1;
-
-        if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::LBrace, .. })) {
-            panic!(
-                "Parse error at line {}, col {}: Expected '{{' after loop",
-                tokens[*index].line,
-                tokens[*index].col
-            );
-        }
-        *index += 1;
-
-        let mut body = Vec::new();
-        while !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RBrace, .. })) {
-            body.push(parse_stmt(tokens, index));
-        }
-        *index += 1;
-
-        return Stmt::Loop(var, expr, body);
+        return parse_loop_stmt(tokens, index);
     }
 
     if let Some(Token { kind: TokenKind::If, .. }) = tokens.get(*index) {
@@ -608,4 +564,94 @@ fn parse_call_args(tokens: &[Token], index: &mut usize) -> Vec<Expr> {
         *index += 1;
     }
     args
+}
+// 新的循环语句解析函数，支持多种循环格式
+fn parse_loop_stmt(tokens: &[Token], index: &mut usize) -> Stmt {
+    use crate::ast::LoopKind;
+
+    if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::Loop, .. })) {
+        panic!("Expected Loop");
+    }
+    *index += 1;
+
+    let loop_kind = match tokens.get(*index) {
+        Some(Token { kind: TokenKind::LBracket, .. }) => {
+            *index += 1;
+            let expr = parse_binary_expr(tokens, index);
+            // Accept either ] or { directly after the expr, for L>[10]{...}
+            if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RBracket, .. }))
+                && !matches!(tokens.get(*index), Some(Token { kind: TokenKind::LBrace, .. }))
+            {
+                panic!("Expected ']' or '{{' after loop expression");
+            }
+            if matches!(tokens.get(*index), Some(Token { kind: TokenKind::RBracket, .. })) {
+                *index += 1;
+            }
+            LoopKind::Times(expr)
+        }
+        Some(Token { kind: TokenKind::Ident(data), .. }) => {
+            let data = data.clone();
+            *index += 1;
+            if let Some(Token { kind: TokenKind::Colon, .. }) = tokens.get(*index) {
+                *index += 1;
+                let item = match tokens.get(*index) {
+                    Some(Token { kind: TokenKind::Ident(var), .. }) => var.clone(),
+                    _ => panic!("Expected variable name after ':'"),
+                };
+                *index += 1;
+                LoopKind::ForEach(item, Expr::Ident(data))
+            } else {
+                panic!("Expected ':' after iterable identifier");
+            }
+        }
+        Some(Token { kind: TokenKind::LParen, .. }) => {
+            *index += 1;
+            let mut parts = Vec::new();
+            while !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RParen, .. }))
+                && !matches!(tokens.get(*index), Some(Token { kind: TokenKind::LBrace, .. }))
+            {
+                parts.push(parse_binary_expr(tokens, index));
+                // Only advance on semicolon if present; do not require it
+                if matches!(tokens.get(*index), Some(Token { kind: TokenKind::Semicolon, .. })) {
+                    *index += 1;
+                } else if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RParen, .. }))
+                    && !matches!(tokens.get(*index), Some(Token { kind: TokenKind::LBrace, .. }))
+                {
+                    panic!("Expected ';', ')', or '{{' in loop header");
+                }
+            }
+            // Accept closing ) if present
+            if matches!(tokens.get(*index), Some(Token { kind: TokenKind::RParen, .. })) {
+                *index += 1;
+            }
+            let loop_kind = match parts.len() {
+                1 => LoopKind::While(parts.remove(0)),
+                3 => {
+                    let init_expr = parts.remove(0);
+                    let cond_expr = parts.remove(0);
+                    let step_expr = parts.remove(0);
+                    let init_stmt = Box::new(Stmt::Expr(init_expr));
+                    let step_stmt = Box::new(Stmt::Expr(step_expr));
+                    LoopKind::For(init_stmt, cond_expr, step_stmt)
+                },
+                _ => panic!("Invalid loop condition count: expected 1 (while) or 3 (for)"),
+            };
+            loop_kind
+        }
+        _ => panic!("Unknown loop format"),
+    };
+
+    // Accept either '{' after loop header, or error
+    if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::LBrace, .. })) {
+        panic!("Expected '{{' after loop header");
+    }
+    *index += 1;
+
+    let mut body = Vec::new();
+    while !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RBrace, .. })) {
+        body.push(parse_stmt(tokens, index));
+    }
+    *index += 1;
+
+    Stmt::Loop(loop_kind, body)
 }

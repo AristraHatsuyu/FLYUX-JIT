@@ -13,10 +13,18 @@ pub enum Expr {
 }
 
 #[derive(Debug, Clone)]
+pub enum LoopKind {
+    Times(Expr),                         // L>[10]
+    ForEach(String, Expr),               // L>data:item
+    While(Expr),                         // L>(condition)
+    For(Box<Stmt>, Expr, Box<Stmt>),     // L>(init; cond; step)
+}
+
+#[derive(Debug, Clone)]
 pub enum Stmt {
     ConstDecl(String, Option<String>, Expr),
     VarDecl(String, Option<String>, Expr),
-    Loop(String, Expr, Vec<Stmt>),
+    Loop(LoopKind, Vec<Stmt>),
     MultiIf(Vec<(Option<Expr>, Vec<Stmt>)>),
     Assign(String, Expr),
     #[allow(dead_code)]

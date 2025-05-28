@@ -161,8 +161,8 @@ pub fn exec_with_ctx(
             Stmt::Assign(name, expr) => {
                 let value = eval_expr(expr, ctx, fns);
                 if let Some((_, typ, is_const)) = ctx.get(name) {
-                    println!("Assign attempt to '{}', context entry: {:?}", name, ctx.get(name)); // 调试输出
                     if *is_const {
+                        println!("Assign attempt to '{}', context entry: {:?}", name, ctx.get(name)); // 调试输出
                         panic!("Cannot assign to constant '{}'", name);
                     }
                     let enforced = if let Some(t) = typ {
@@ -191,46 +191,106 @@ pub fn exec_with_ctx(
                 }
             }
 
-            Stmt::Loop(var, expr, body) => {
-                let count_str = eval_expr(expr, ctx, fns);
-                let count = count_str.parse::<usize>().unwrap_or(0);
-                for i in 0..count {
-                    ctx.insert(var.clone(), (i.to_string(), Some("int".to_string()), false));
-                    for stmt in body {
-                        match stmt {
-                            Stmt::ConstDecl(name, typ, expr) => {
-                                let mut val = eval_expr(expr, ctx, fns);
-                                let inferred_type = typ.clone().or_else(|| infer_type(&val));
-                                let expected_type = typ.clone().unwrap_or_else(|| inferred_type.clone().unwrap_or("string".into()));
-                                if let Some(t) = &typ {
-                                    if !["int", "float", "bool", "string", "obj"].contains(&t.as_str()) {
-                                        panic!("Unknown type '{}'", t);
-                                    }
-                                }
-                                if expected_type == "bool" {
-                                    let normalized = val.trim_matches('"').to_lowercase();
-                                    val = match normalized.as_str() {
-                                        "true" | "1" => "1".to_string(),
-                                        "false" | "0" => "0".to_string(),
-                                        _ => panic!("Invalid boolean literal: '{}'", val),
-                                    };
-                                } else if expected_type == "int" {
-                                    val.parse::<i64>().unwrap_or_else(|_| panic!("Invalid int literal: '{}'", val));
-                                } else if expected_type == "float" {
-                                    val.parse::<f64>().unwrap_or_else(|_| panic!("Invalid float literal: '{}'", val));
-                                } else if expected_type == "string" {
-                                    if val.starts_with('"') && val.ends_with('"') {
-                                        val = val[1..val.len()-1].to_string(); // 去除引号
-                                    } else {
-                                        val = val.to_string(); // 放宽要求，允许非引号包裹的字符串（如对象、数组或字面量）
-                                    }
-                                }
-                                if let Some((_, _, true)) = ctx.get(name) {
-                                    panic!("Cannot redefine constant '{}'", name);
-                                }
-                                ctx.insert(name.clone(), (val, Some(expected_type), typ.is_some()));
+            Stmt::Loop(kind, body) => {
+                match kind.clone() {
+                    crate::ast::LoopKind::Times(expr) => {
+                        let count = eval_expr(&expr, ctx, fns)
+                            .parse::<usize>()
+                            .unwrap_or_else(|_| panic!("Invalid loop count: {:?}", expr));
+                        for i in 0..count {
+                            ctx.insert("_".to_string(), (i.to_string(), Some("int".to_string()), false));
+                            for stmt in body {
+                                exec_with_ctx(&Function {
+                                    name: "<loop>".into(),
+                                    params: vec![],
+                                    body: vec![stmt.clone()],
+                                }, ctx, fns);
                             }
-                            _ => {}
+                        }
+                    }
+                    crate::ast::LoopKind::While(expr) => {
+                        while {
+                            let cond = eval_expr(&expr, ctx, fns);
+                            cond != "0" && cond.to_lowercase() != "false"
+                        } {
+                            for stmt in body {
+                                exec_with_ctx(&Function {
+                                    name: "<while>".into(),
+                                    params: vec![],
+                                    body: vec![stmt.clone()],
+                                }, ctx, fns);
+                            }
+                        }
+                    }
+                    crate::ast::LoopKind::ForEach(var, expr) => {
+                        let list_val = eval_expr(&expr, ctx, fns);
+                        if list_val.starts_with('[') && list_val.ends_with(']') {
+                            let trimmed = &list_val[1..list_val.len()-1];
+                            let mut elements = vec![];
+                            let mut current = String::new();
+                            let mut depth = 0;
+
+                            for c in trimmed.chars() {
+                                match c {
+                                    '[' | '{' => {
+                                        depth += 1;
+                                        current.push(c);
+                                    }
+                                    ']' | '}' => {
+                                        depth -= 1;
+                                        current.push(c);
+                                    }
+                                    ',' if depth == 0 => {
+                                        elements.push(current.trim().to_string());
+                                        current.clear();
+                                    }
+                                    _ => current.push(c),
+                                }
+                            }
+                            if !current.trim().is_empty() {
+                                elements.push(current.trim().to_string());
+                            }
+
+                            for el in elements {
+                                ctx.insert(var.clone(), (el.to_string(), Some("string".to_string()), false));
+                                for stmt in body {
+                                    exec_with_ctx(&Function {
+                                        name: "<foreach>".into(),
+                                        params: vec![],
+                                        body: vec![stmt.clone()],
+                                    }, ctx, fns);
+                                }
+                            }
+                        } else {
+                            panic!("For-each target is not an array: {}", list_val);
+                        }
+                    }
+                    crate::ast::LoopKind::For(init, cond, step) => {
+                        // Execute the initialization statement
+                        exec_with_ctx(&Function {
+                            name: "<for-init>".into(),
+                            params: vec![],
+                            body: vec![*init.clone()],
+                        }, ctx, fns);
+
+                        while {
+                            let cond_val = eval_expr(&cond, ctx, fns);
+                            cond_val != "0" && cond_val.to_lowercase() != "false"
+                        } {
+                            for stmt in body {
+                                exec_with_ctx(&Function {
+                                    name: "<for-body>".into(),
+                                    params: vec![],
+                                    body: vec![stmt.clone()],
+                                }, ctx, fns);
+                            }
+
+                            // Execute the step statement
+                            exec_with_ctx(&Function {
+                                name: "<for-step>".into(),
+                                params: vec![],
+                                body: vec![*step.clone()],
+                            }, ctx, fns);
                         }
                     }
                 }

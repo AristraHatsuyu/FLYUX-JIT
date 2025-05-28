@@ -15,6 +15,7 @@ pub enum TokenKind {
     BindTwo,
     Assign,
     ForceAssign,
+    Semicolon,
 
     LParen, RParen,
     LBrace, RBrace,

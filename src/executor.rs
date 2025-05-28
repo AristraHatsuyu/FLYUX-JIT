@@ -93,20 +93,10 @@ pub fn exec_with_ctx(
                 } else if expected_type == "float" {
                     val.parse::<f64>().unwrap_or_else(|_| panic!("Invalid float literal: '{}'", val));
                 } else if expected_type == "string" {
-                    // 如果原始表达式为 Expr::Str 则直接使用，无需二次解析
                     if val.starts_with('"') && val.ends_with('"') {
                         val = val[1..val.len()-1].to_string(); // 去除引号
-                    } else if val.parse::<i64>().is_ok() || val.parse::<f64>().is_ok() {
-                        val = val.to_string();
-                    } else if val == "true" || val == "false" {
-                        val = val.clone(); // 保持字符串 "true"/"false"
-                    } else if ["<null>", "<undef>"].contains(&val.to_lowercase().as_str()) {
-                        val = val.to_string();
-                    } else if val.starts_with('[') && val.ends_with(']') {
-                        val = val.to_string(); // 保留数组格式
                     } else {
-                        // 其他必须加引号
-                        panic!("String literal must be quoted: '{}'", val);
+                        val = val.to_string(); // 放宽要求，允许非引号包裹的字符串（如对象、数组或字面量）
                     }
                 }
 
@@ -133,17 +123,9 @@ pub fn exec_with_ctx(
                     val.parse::<f64>().unwrap_or_else(|_| panic!("Invalid float literal: '{}'", val));
                 } else if expected_type == "string" {
                     if val.starts_with('"') && val.ends_with('"') {
-                        val = val[1..val.len()-1].to_string(); // strip quotes
-                    } else if val.parse::<i64>().is_ok() || val.parse::<f64>().is_ok() {
-                        val = val.to_string();
-                    } else if val == "true" || val == "false" {
-                        val = val.clone();
-                    } else if ["<null>", "<undef>"].contains(&val.to_lowercase().as_str()) {
-                        val = val.to_string();
-                    } else if val.starts_with('[') && val.ends_with(']') {
-                        val = val.to_string(); // 保留数组格式
+                        val = val[1..val.len()-1].to_string(); // 去除引号
                     } else {
-                        panic!("String literal must be quoted: '{}'", val);
+                        val = val.to_string(); // 放宽要求，允许非引号包裹的字符串（如对象、数组或字面量）
                     }
                 }
                 ctx.insert(name.clone(), (val, Some(expected_type), false));
@@ -237,20 +219,10 @@ pub fn exec_with_ctx(
                                 } else if expected_type == "float" {
                                     val.parse::<f64>().unwrap_or_else(|_| panic!("Invalid float literal: '{}'", val));
                                 } else if expected_type == "string" {
-                                    // 如果原始表达式为 Expr::Str 则直接使用，无需二次解析
                                     if val.starts_with('"') && val.ends_with('"') {
                                         val = val[1..val.len()-1].to_string(); // 去除引号
-                                    } else if val.parse::<i64>().is_ok() || val.parse::<f64>().is_ok() {
-                                        val = val.to_string();
-                                    } else if val == "true" || val == "false" {
-                                        val = val.clone(); // 保持字符串 "true"/"false"
-                                    } else if ["<null>", "<undef>"].contains(&val.to_lowercase().as_str()) {
-                                        val = val.to_string();
-                                    } else if val.starts_with('[') && val.ends_with(']') {
-                                        val = val.to_string(); // 保留数组格式
                                     } else {
-                                        // 其他必须加引号
-                                        panic!("String literal must be quoted: '{}'", val);
+                                        val = val.to_string(); // 放宽要求，允许非引号包裹的字符串（如对象、数组或字面量）
                                     }
                                 }
                                 if let Some((_, _, true)) = ctx.get(name) {
@@ -305,11 +277,11 @@ fn eval_expr(
 ) -> String {
     match expr {
         Expr::Number(n) => n.to_string(),
-        Expr::Str(s) => format!("\"{}\"", s),
+        Expr::Str(s) => s.clone(),
         Expr::Ident(id) => {
             match id.as_str() {
-                "true" => "true".to_string(),
-                "false" => "false".to_string(),
+                "true" => "1".to_string(),
+                "false" => "0".to_string(),
                 _ => {
                     if let Some((val, _, _)) = ctx.get(id) {
                         val.clone()
@@ -366,29 +338,133 @@ fn eval_expr(
             format!("[{}]", values.join(","))
         }
         Expr::Index(array_expr, index_expr) => {
-            let arr_str = eval_expr(array_expr, ctx, fns);
-            let idx_str = eval_expr(index_expr, ctx, fns);
-            let idx = idx_str.parse::<usize>().unwrap_or_else(|_| panic!("Invalid index: '{}'", idx_str));
-            let trimmed = arr_str.trim_matches(&['[', ']'][..]);
-            let elements: Vec<&str> = trimmed.split(',').map(|s| s.trim()).collect();
-            if idx >= elements.len() {
-                panic!("Array index out of bounds: {}", idx);
+            let target_str = eval_expr(array_expr, ctx, fns);
+            let key = eval_expr(index_expr, ctx, fns).trim_matches('"').to_string();
+
+            if target_str.starts_with('{') && target_str.ends_with('}') {
+                // Handle object-style index
+                let inner = &target_str[1..target_str.len()-1];
+                let mut map = HashMap::new();
+                let mut depth = 0;
+                let mut current = String::new();
+                let mut entries = vec![];
+
+                for c in inner.chars() {
+                    match c {
+                        '{' | '[' => {
+                            depth += 1;
+                            current.push(c);
+                        }
+                        '}' | ']' => {
+                            depth -= 1;
+                            current.push(c);
+                        }
+                        ',' if depth == 0 => {
+                            entries.push(current.trim().to_string());
+                            current.clear();
+                        }
+                        _ => current.push(c),
+                    }
+                }
+                if !current.trim().is_empty() {
+                    entries.push(current.trim().to_string());
+                }
+
+                for kv in entries {
+                    if let Some((k, v)) = kv.split_once(':') {
+                        let parsed_key = k.trim().trim_matches('"').to_string();
+                        let val = v.trim().to_string();
+                        map.insert(parsed_key, val);
+                    }
+                }
+
+                if let Some(value) = map.get(&key) {
+                    value.clone()
+                } else {
+                    panic!("Key '{}' not found in object: {}", key, target_str)
+                }
+            } else if target_str.starts_with('[') && target_str.ends_with(']') {
+                // Handle array-style index with nested structure parsing
+                let idx = key.parse::<usize>().unwrap_or_else(|_| panic!("Invalid index: '{}'", key));
+                let trimmed = target_str.trim_matches(&['[', ']'][..]);
+
+                let mut elements = vec![];
+                let mut current = String::new();
+                let mut depth = 0;
+
+                for c in trimmed.chars() {
+                    match c {
+                        '{' | '[' => {
+                            depth += 1;
+                            current.push(c);
+                        }
+                        '}' | ']' => {
+                            depth -= 1;
+                            current.push(c);
+                        }
+                        ',' if depth == 0 => {
+                            elements.push(current.trim().to_string());
+                            current.clear();
+                        }
+                        _ => current.push(c),
+                    }
+                }
+                if !current.trim().is_empty() {
+                    elements.push(current.trim().to_string());
+                }
+
+                if idx >= elements.len() {
+                    panic!("Array index out of bounds: {}", idx);
+                }
+
+                elements[idx].to_string()
+            } else {
+                panic!("Unsupported index target: {}", target_str)
             }
-            elements[idx].to_string()
         }
         Expr::Access(obj_expr, prop) => {
             let obj_str = eval_expr(obj_expr, ctx, fns);
             if obj_str.starts_with('{') && obj_str.ends_with('}') {
                 let inner = &obj_str[1..obj_str.len()-1];
-                let pairs: HashMap<_, _> = inner.split(',').filter_map(|entry| {
-                    let mut parts = entry.splitn(2, ':');
-                    let key = parts.next()?.trim().trim_matches('"');
-                    let val = parts.next()?.trim();
-                    Some((key.to_string(), val.to_string()))
-                }).collect();
+                let mut pairs = HashMap::new();
+                let mut depth = 0;
+                let mut current = String::new();
+                let mut entries = vec![];
+
+                for c in inner.chars() {
+                    match c {
+                        '{' | '[' => {
+                            depth += 1;
+                            current.push(c);
+                        }
+                        '}' | ']' => {
+                            depth -= 1;
+                            current.push(c);
+                        }
+                        ',' if depth == 0 => {
+                            entries.push(current.trim().to_string());
+                            current.clear();
+                        }
+                        _ => current.push(c),
+                    }
+                }
+                if !current.trim().is_empty() {
+                    entries.push(current.trim().to_string());
+                }
+
+                for kv in entries {
+                    if let Some((k, v)) = kv.split_once(':') {
+                        let key = k.trim().trim_matches('"').to_string();
+                        let val = v.trim().to_string();
+                        pairs.insert(key, val);
+                    }
+                }
+
                 if let Some(value) = pairs.get(prop) {
                     value.clone()
                 } else {
+                    println!("Accessing property '{}' from object string: {}", prop, obj_str);
+                    println!("Parsed key-value pairs: {:?}", pairs);
                     panic!("Property '{}' not found in object", prop)
                 }
             } else {

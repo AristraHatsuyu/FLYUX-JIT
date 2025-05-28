@@ -419,7 +419,7 @@ fn parse_expr(tokens: &[Token], index: &mut usize) -> Expr {
             *index += 1;
             let mut elements = Vec::new();
             while !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RBracket, .. })) {
-                elements.push(parse_binary_expr(tokens, index));
+                elements.push(parse_expr(tokens, index));
                 if matches!(tokens.get(*index), Some(Token { kind: TokenKind::Comma, .. })) {
                     *index += 1;
                 }
@@ -453,7 +453,7 @@ fn parse_expr(tokens: &[Token], index: &mut usize) -> Expr {
                     panic!("Expected ':' after object key");
                 }
                 *index += 1;
-                let value = parse_binary_expr(tokens, index);
+                let value = parse_expr(tokens, index);
                 props.push((key, Box::new(value)));
                 if matches!(tokens.get(*index), Some(Token { kind: TokenKind::Comma, .. })) {
                     *index += 1;

@@ -94,6 +94,29 @@ fn parse_stmt(tokens: &[Token], index: &mut usize) -> Stmt {
             _ => break,
         }
     }
+    // Prefix increment/decrement: ++a or --a
+    if matches!(tokens.get(*index), Some(Token { kind: TokenKind::Unknown('+'), .. }))
+        && matches!(tokens.get(*index + 1), Some(Token { kind: TokenKind::Unknown('+'), .. }))
+        && matches!(tokens.get(*index + 2), Some(Token { kind: TokenKind::Ident(_), .. })) {
+        // consume '++'
+        *index += 2;
+        // capture variable name
+        if let Token { kind: TokenKind::Ident(name), .. } = tokens.get(*index).unwrap() {
+            let var = name.clone();
+            *index += 1;
+            return Stmt::Increment(var);
+        }
+    }
+    if matches!(tokens.get(*index), Some(Token { kind: TokenKind::Unknown('-'), .. }))
+        && matches!(tokens.get(*index + 1), Some(Token { kind: TokenKind::Unknown('-'), .. }))
+        && matches!(tokens.get(*index + 2), Some(Token { kind: TokenKind::Ident(_), .. })) {
+        *index += 2;
+        if let Token { kind: TokenKind::Ident(name), .. } = tokens.get(*index).unwrap() {
+            let var = name.clone();
+            *index += 1;
+            return Stmt::Decrement(var);
+        }
+    }
     if let Some(Token { kind: TokenKind::Return, .. }) = tokens.get(*index) {
         *index += 1;
         let expr = parse_binary_expr(tokens, index);
@@ -260,6 +283,22 @@ fn parse_stmt(tokens: &[Token], index: &mut usize) -> Stmt {
         }
     }
 
+    // Postfix increment/decrement: a++ or a--
+    if let Some(Token { kind: TokenKind::Ident(name), .. }) = tokens.get(*index) {
+        if matches!(tokens.get(*index + 1), Some(Token { kind: TokenKind::Unknown('+'), .. }))
+            && matches!(tokens.get(*index + 2), Some(Token { kind: TokenKind::Unknown('+'), .. })) {
+            let var = name.clone();
+            *index += 3;
+            return Stmt::Increment(var);
+        }
+        if matches!(tokens.get(*index + 1), Some(Token { kind: TokenKind::Unknown('-'), .. }))
+            && matches!(tokens.get(*index + 2), Some(Token { kind: TokenKind::Unknown('-'), .. })) {
+            let var = name.clone();
+            *index += 3;
+            return Stmt::Decrement(var);
+        }
+    }
+
     // ✅ 变量/常量定义语句和普通变量赋值
     if let Some(Token { kind: TokenKind::Ident(name), .. }) = tokens.get(*index) {
         let name = name.clone();
@@ -399,6 +438,7 @@ fn parse_stmt(tokens: &[Token], index: &mut usize) -> Stmt {
             );
         }
     }
+
 
     panic!(
         "Parse error at line {}, col {}: Unknown statement",

@@ -27,6 +27,8 @@ pub enum Stmt {
     Loop(LoopKind, Vec<Stmt>),
     MultiIf(Vec<(Option<Expr>, Vec<Stmt>)>),
     Assign(String, Expr),
+    Increment(String),
+    Decrement(String),
     #[allow(dead_code)]
     Expr(Expr),
     Return(Expr),

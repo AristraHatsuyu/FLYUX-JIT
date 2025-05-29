@@ -323,6 +323,45 @@ pub fn exec_with_ctx(
                     }
                 }
             }
+            Stmt::Increment(var) => {
+                println!("DEBUG: Incrementing '{}' from {:?}", var, ctx.get(var).unwrap());
+                let (current_str, typ, is_const) = ctx.get(var)
+                    .expect(&format!("Variable '{}' not found for increment", var))
+                    .clone();
+                let new_str = match typ.as_deref() {
+                    Some("int") => {
+                        let n = current_str.parse::<i64>()
+                            .unwrap_or_else(|_| panic!("Invalid int for increment: '{}'", current_str));
+                        (n + 1).to_string()
+                    }
+                    Some("float") => {
+                        let f = current_str.parse::<f64>()
+                            .unwrap_or_else(|_| panic!("Invalid float for increment: '{}'", current_str));
+                        (f + 1.0).to_string()
+                    }
+                    _ => panic!("Unsupported type '{:?}' for increment", typ),
+                };
+                ctx.insert(var.clone(), (new_str, typ.clone(), is_const));
+            }
+            Stmt::Decrement(var) => {
+                let (current_str, typ, is_const) = ctx.get(var)
+                    .expect(&format!("Variable '{}' not found for decrement", var))
+                    .clone();
+                let new_str = match typ.as_deref() {
+                    Some("int") => {
+                        let n = current_str.parse::<i64>()
+                            .unwrap_or_else(|_| panic!("Invalid int for decrement: '{}'", current_str));
+                        (n - 1).to_string()
+                    }
+                    Some("float") => {
+                        let f = current_str.parse::<f64>()
+                            .unwrap_or_else(|_| panic!("Invalid float for decrement: '{}'", current_str));
+                        (f - 1.0).to_string()
+                    }
+                    _ => panic!("Unsupported type '{:?}' for decrement", typ),
+                };
+                ctx.insert(var.clone(), (new_str, typ.clone(), is_const));
+            }
             _ => {}
         }
     }

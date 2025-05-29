@@ -15,7 +15,6 @@ pub enum TokenKind {
     BindTwo,
     Assign,
     ForceAssign,
-    Semicolon,
 
     LParen, RParen,
     LBrace, RBrace,
@@ -36,6 +35,9 @@ pub enum TokenKind {
     If,
     Elif,
     Else,
+    
+    #[allow(dead_code)]
+    Semicolon,
 }
 
 pub fn tokenize(input: &str) -> Vec<Token> {

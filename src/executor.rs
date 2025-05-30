@@ -371,10 +371,54 @@ pub fn exec_with_ctx(
 
 fn eval_expr(
     expr: &Expr,
-    ctx: &HashMap<String, (String, Option<String>, bool)>,
+    ctx: &mut HashMap<String, (String, Option<String>, bool)>,
     fns: &HashMap<String, &Function>
 ) -> String {
     match expr {
+        Expr::PostfixIncrement(var) => {
+            // Evaluate and apply postfix increment: return new value after increment
+            let (current_str, typ, _is_const) = ctx.get(var)
+                .expect(&format!("Undefined identifier in postfix ++: '{}'", var))
+                .clone();
+            let old = current_str.clone();
+            let new_str = match typ.as_deref() {
+                Some("int") => {
+                    let n = old.parse::<i64>()
+                        .unwrap_or_else(|_| panic!("Invalid int in postfix ++: '{}'", old));
+                    (n + 1).to_string()
+                }
+                Some("float") => {
+                    let f = old.parse::<f64>()
+                        .unwrap_or_else(|_| panic!("Invalid float in postfix ++: '{}'", old));
+                    (f + 1.0).to_string()
+                }
+                _ => panic!("Unsupported type '{:?}' for postfix ++ on '{}'", typ, var),
+            };
+            ctx.insert(var.clone(), (new_str.clone(), typ.clone(), _is_const));
+            new_str
+        }
+        Expr::PostfixDecrement(var) => {
+            // Evaluate and apply postfix decrement: return new value after decrement
+            let (current_str, typ, _is_const) = ctx.get(var)
+                .expect(&format!("Undefined identifier in postfix --: '{}'", var))
+                .clone();
+            let old = current_str.clone();
+            let new_str = match typ.as_deref() {
+                Some("int") => {
+                    let n = old.parse::<i64>()
+                        .unwrap_or_else(|_| panic!("Invalid int in postfix --: '{}'", old));
+                    (n - 1).to_string()
+                }
+                Some("float") => {
+                    let f = old.parse::<f64>()
+                        .unwrap_or_else(|_| panic!("Invalid float in postfix --: '{}'", old));
+                    (f - 1.0).to_string()
+                }
+                _ => panic!("Unsupported type '{:?}' for postfix -- on '{}'", typ, var),
+            };
+            ctx.insert(var.clone(), (new_str.clone(), typ.clone(), _is_const));
+            new_str
+        }
         Expr::Number(n) => n.to_string(),
         Expr::Str(s) => s.clone(),
         Expr::Ident(id) => {

@@ -10,6 +10,8 @@ pub enum Expr {
     Index(Box<Expr>, Box<Expr>),
     Object(Vec<(String, Box<Expr>)>),
     Access(Box<Expr>, String),
+    PostfixIncrement(String),
+    PostfixDecrement(String),
 }
 
 #[derive(Debug, Clone)]

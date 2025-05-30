@@ -15,10 +15,10 @@ F>main(){
   print("y = x++ + x++:", y, "final x:", x)
 
   // Loop with postfix decrement
-  
+  counter := 3
   print("Countdown:")
-  L>(counter:=3;counter>0;counter--) {
-    print(counter)
+  L>(counter > 0) {
+    print(counter--)
   }
 
   // Emoji in complex condition

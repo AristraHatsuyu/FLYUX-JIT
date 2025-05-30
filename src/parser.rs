@@ -583,6 +583,19 @@ fn parse_expr(tokens: &[Token], index: &mut usize) -> Expr {
                     break;
                 }
             }
+            // support postfix ++/--
+            if let Expr::Ident(name) = &expr {
+                if matches!(tokens.get(*index), Some(Token { kind: TokenKind::Unknown('+'), .. }))
+                    && matches!(tokens.get(*index + 1), Some(Token { kind: TokenKind::Unknown('+'), .. })) {
+                    *index += 2;
+                    return Expr::PostfixIncrement(name.clone());
+                }
+                if matches!(tokens.get(*index), Some(Token { kind: TokenKind::Unknown('-'), .. }))
+                    && matches!(tokens.get(*index + 1), Some(Token { kind: TokenKind::Unknown('-'), .. })) {
+                    *index += 2;
+                    return Expr::PostfixDecrement(name.clone());
+                }
+            }
             return expr;
         }
         _ => panic!("Unsupported expression"),

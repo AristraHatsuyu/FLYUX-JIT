@@ -489,26 +489,35 @@ pub fn exec_with_ctx(
                             panic!("Invalid nested left-hand side: {:?}", lhs);
                         }
                     }
-                    // arr[index] and nested arrays: full support for nested Index/Access
+                    // arr[index] and nested arrays: full support for nested Index/Access, now with _append
                     Expr::Index(arr_expr, idx_expr) => {
                         // Evaluate original array string
                         let arr_str = eval_expr(arr_expr, ctx, fns);
                         // Parse into Vec<String>
                         let mut vec = parse_array_string(&arr_str);
-                        // Compute index
-                        let idx = eval_expr(idx_expr, ctx, fns)
-                            .parse::<usize>()
-                            .unwrap_or_else(|_| panic!("Invalid index for '{:?}'", arr_expr));
-                        if idx >= vec.len() {
-                            panic!("Index {} out of bounds for {:?}", idx, arr_expr);
+
+                        // Determine if append operation
+                        let append_mode = matches!(idx_expr.as_ref(), Expr::Ident(s) if s == "_append");
+
+                        // Compute index or use push
+                        if append_mode {
+                            vec.push(val_str.clone());
+                        } else {
+                            // parse numeric index
+                            let idx = eval_expr(idx_expr, ctx, fns)
+                                .parse::<usize>()
+                                .unwrap_or_else(|_| panic!("Invalid index for '{:?}'", arr_expr));
+                            if idx >= vec.len() {
+                                panic!("Index {} out of bounds for {:?}", idx, arr_expr);
+                            }
+                            vec[idx] = val_str.clone();
                         }
-                        // Update element
-                        vec[idx] = val_str.clone();
+
+                        // Serialize back
                         let new_arr_str = serialize_array_vec(&vec);
 
                         // Assign back to variable or nested object field
                         match arr_expr.as_ref() {
-                            // Simple variable array
                             Expr::Ident(arr_name) => {
                                 if let Some(ctx_val) = ctx.get_mut(arr_name) {
                                     ctx_val.0 = new_arr_str;
@@ -516,17 +525,16 @@ pub fn exec_with_ctx(
                                     panic!("'{}' is not defined", arr_name);
                                 }
                             }
-                            // Nested array in object: obj.field[...] or deeper
+                            // nested array in object
                             _ => {
-                                // Build path to the array field
+                                // Build path for nested object
                                 let mut path = Vec::new();
                                 let mut expr = arr_expr.as_ref();
                                 while let Expr::Access(inner, field) = expr {
                                     path.push(field.clone());
                                     expr = inner.as_ref();
                                 }
-                                path.reverse(); // top-down
-                                // expr must now be root identifier
+                                path.reverse();
                                 if let Expr::Ident(root) = expr {
                                     if let Some(ctx_val) = ctx.get_mut(root) {
                                         let updated = update_object_str(&ctx_val.0, &path, new_arr_str.clone());
@@ -556,6 +564,13 @@ fn eval_expr(
     fns: &HashMap<String, &Function>
 ) -> String {
     match expr {
+        Expr::Not(inner) => {
+            // Evaluate the inner expression and invert its boolean value
+            let val = eval_expr(inner, ctx, fns);
+            // Treat empty string, "0", or "false" as false; everything else as true
+            let is_truthy = !(val.is_empty() || val == "0" || val.eq_ignore_ascii_case("false"));
+            (!is_truthy).to_string()
+        }
         Expr::PostfixIncrement(var) => {
             // Evaluate and apply postfix increment: return new value after increment
             let (current_str, typ, _is_const) = ctx.get(var)

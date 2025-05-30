@@ -563,6 +563,27 @@ fn parse_binary_expr(tokens: &[Token], index: &mut usize) -> Expr {
 
 fn parse_expr(tokens: &[Token], index: &mut usize) -> Expr {
     match tokens.get(*index) {
+        // Unary logical NOT: !expr
+        Some(Token { kind: TokenKind::Unknown('!'), .. }) => {
+            // consume '!'
+            *index += 1;
+            // parse the next expression
+            let inner = parse_expr(tokens, index);
+            return Expr::Not(Box::new(inner));
+        }
+        // Unary minus: -expr or -number
+        Some(Token { kind: TokenKind::Unknown('-'), .. }) => {
+            *index += 1; // skip '-'
+            // If next token is a number literal, negate directly
+            if let Some(Token { kind: TokenKind::Number(n), .. }) = tokens.get(*index) {
+                *index += 1;
+                return Expr::Number(-*n);
+            } else {
+                // Otherwise parse the inner expression and represent as 0 - expr
+                let rhs = parse_expr(tokens, index);
+                return Expr::Binary(Box::new(Expr::Number(0.0)), "-".to_string(), Box::new(rhs));
+            }
+        }
         // Parentheses grouping: (expr)
         Some(Token { kind: TokenKind::LParen, .. }) => {
             // Consume '('
@@ -694,13 +715,28 @@ fn parse_expr(tokens: &[Token], index: &mut usize) -> Expr {
                     *index += 1;
                     expr = Expr::Access(Box::new(expr), prop);
                 } else if matches!(tokens.get(*index), Some(Token { kind: TokenKind::LBracket, .. })) {
-                    *index += 1;
-                    let idx = parse_binary_expr(tokens, index);
-                    if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RBracket, .. })) {
-                        panic!("Expected closing bracket ] for array index");
+                    // Support append syntax arr[]: if immediately followed by ']', treat as append
+                    if matches!(tokens.get(*index + 1), Some(Token { kind: TokenKind::RBracket, .. })) {
+                        // Skip '[' and ']'
+                        *index += 2;
+                        // Use special sentinel "_append" as index
+                        expr = Expr::Index(
+                            Box::new(expr),
+                            Box::new(Expr::Ident("_append".to_string())),
+                        );
+                    } else {
+                        // Normal indexing [expr]
+                        *index += 1; // skip '['
+                        let idx = parse_binary_expr(tokens, index);
+                        if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RBracket, .. })) {
+                            panic!(
+                                "Parse error at line {}, col {}: Expected ']' after index",
+                                tokens[*index].line, tokens[*index].col
+                            );
+                        }
+                        *index += 1; // skip ']'
+                        expr = Expr::Index(Box::new(expr), Box::new(idx));
                     }
-                    *index += 1;
-                    expr = Expr::Index(Box::new(expr), Box::new(idx));
                 } else {
                     break;
                 }
@@ -720,7 +756,16 @@ fn parse_expr(tokens: &[Token], index: &mut usize) -> Expr {
             }
             return expr;
         }
-        _ => panic!("Unsupported expression"),
+        _ => {
+            if let Some(tok) = tokens.get(*index) {
+                panic!(
+                    "Parse error at line {}, col {}: Unsupported expression token {:?}",
+                    tok.line, tok.col, tok.kind
+                );
+            } else {
+                panic!("Parse error: Unexpected end of input while parsing expression");
+            }
+        }
     }
 }
 

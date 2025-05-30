@@ -7,6 +7,7 @@ pub enum Expr {
     Call(String, Vec<Expr>),
     Binary(Box<Expr>, String, Box<Expr>),
     Logical(String, Box<Expr>, Box<Expr>),
+    Not(Box<Expr>),
     Array(Vec<Expr>),
     Index(Box<Expr>, Box<Expr>),
     Object(Vec<(String, Box<Expr>)>),

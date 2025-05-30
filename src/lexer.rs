@@ -124,6 +124,15 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                     tokens.push(Token { kind: TokenKind::Unknown('>'), line: token_line, col: token_col });
                 }
             }
+            '!' => {
+                tokens.push(Token {
+                    kind: TokenKind::Unknown('!'),
+                    line: token_line,
+                    col: token_col,
+                });
+                chars.next();
+                col += 1;
+            }
             '&' => {
                 tokens.push(Token {
                     kind: TokenKind::Unknown('&'),
@@ -161,15 +170,37 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                 }
             }
             '"' => {
+                // Parse string literal with backslash escapes
                 chars.next();
                 col += 1;
                 let mut value = String::new();
                 while let Some(&nc) = chars.peek() {
                     if nc == '"' {
+                        // closing quote
                         chars.next();
                         col += 1;
                         break;
                     }
+                    if nc == '\\' {
+                        // escape sequence
+                        chars.next();
+                        col += 1;
+                        if let Some(&esc) = chars.peek() {
+                            let escaped_char = match esc {
+                                'n' => '\n',
+                                't' => '\t',
+                                'r' => '\r',
+                                '\\' => '\\',
+                                '"' => '"',
+                                other => other,
+                            };
+                            value.push(escaped_char);
+                            chars.next();
+                            col += 1;
+                        }
+                        continue;
+                    }
+                    // regular character
                     value.push(nc);
                     chars.next();
                     if nc == '\n' {

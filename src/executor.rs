@@ -489,24 +489,55 @@ pub fn exec_with_ctx(
                             panic!("Invalid nested left-hand side: {:?}", lhs);
                         }
                     }
-                    // arr[index]
+                    // arr[index] and nested arrays: full support for nested Index/Access
                     Expr::Index(arr_expr, idx_expr) => {
-                        if let Expr::Ident(arr_name) = arr_expr.as_ref() {
-                            let idx = eval_expr(idx_expr, ctx, fns)
-                                .parse::<usize>()
-                                .unwrap_or_else(|_| panic!("Invalid index for '{}'", arr_name));
-                            if let Some(ctx_val) = ctx.get_mut(arr_name) {
-                                let mut vec = parse_array_string(&ctx_val.0);
-                                if idx >= vec.len() {
-                                    panic!("Index {} out of bounds for '{}'", idx, arr_name);
+                        // Evaluate original array string
+                        let arr_str = eval_expr(arr_expr, ctx, fns);
+                        // Parse into Vec<String>
+                        let mut vec = parse_array_string(&arr_str);
+                        // Compute index
+                        let idx = eval_expr(idx_expr, ctx, fns)
+                            .parse::<usize>()
+                            .unwrap_or_else(|_| panic!("Invalid index for '{:?}'", arr_expr));
+                        if idx >= vec.len() {
+                            panic!("Index {} out of bounds for {:?}", idx, arr_expr);
+                        }
+                        // Update element
+                        vec[idx] = val_str.clone();
+                        let new_arr_str = serialize_array_vec(&vec);
+
+                        // Assign back to variable or nested object field
+                        match arr_expr.as_ref() {
+                            // Simple variable array
+                            Expr::Ident(arr_name) => {
+                                if let Some(ctx_val) = ctx.get_mut(arr_name) {
+                                    ctx_val.0 = new_arr_str;
+                                } else {
+                                    panic!("'{}' is not defined", arr_name);
                                 }
-                                vec[idx] = val_str.clone();
-                                ctx_val.0 = serialize_array_vec(&vec);
-                            } else {
-                                panic!("'{}' is not an array", arr_name);
                             }
-                        } else {
-                            panic!("Invalid array target: {:?}", arr_expr);
+                            // Nested array in object: obj.field[...] or deeper
+                            _ => {
+                                // Build path to the array field
+                                let mut path = Vec::new();
+                                let mut expr = arr_expr.as_ref();
+                                while let Expr::Access(inner, field) = expr {
+                                    path.push(field.clone());
+                                    expr = inner.as_ref();
+                                }
+                                path.reverse(); // top-down
+                                // expr must now be root identifier
+                                if let Expr::Ident(root) = expr {
+                                    if let Some(ctx_val) = ctx.get_mut(root) {
+                                        let updated = update_object_str(&ctx_val.0, &path, new_arr_str.clone());
+                                        ctx_val.0 = updated;
+                                    } else {
+                                        panic!("'{}' is not found for nested array assignment", root);
+                                    }
+                                } else {
+                                    panic!("Invalid nested array target: {:?}", arr_expr);
+                                }
+                            }
                         }
                     }
                     _ => panic!("Invalid left-hand side in property assignment: {:?}", lhs),
@@ -786,6 +817,13 @@ fn eval_expr(
         }
         Expr::Access(obj_expr, prop) => {
             let obj_str = eval_expr(obj_expr, ctx, fns);
+
+            // Support array.length
+            if obj_str.starts_with('[') && obj_str.ends_with(']') && prop == "length" {
+                let elements = parse_array_string(&obj_str);
+                return elements.len().to_string();
+            }
+
             if obj_str.starts_with('{') && obj_str.ends_with('}') {
                 let inner = &obj_str[1..obj_str.len()-1];
                 let mut pairs = HashMap::new();

@@ -1,19 +1,19 @@
 F>main(){
-  // 定义一个简单对象并测试属性修改
-  obj := {a:1, b:2}
-  print("原始 obj.a:", obj.a)
-  obj.a = 10
-  print("修改后 obj.a:", obj.a)
-
-  // 嵌套对象键值修改
-  nested := {x:{y:20}}
-  print("原始 nested.x.y:", nested.x.y)
-  nested.x.y = 30
-  print("修改后 nested.x.y:", nested.x.y)
-
-  // 对象中数组元素修改
-  complex := {arr:[5,6,7]}
-  print("原始 complex.arr[1]:", complex.arr[1])
-  complex.arr[1] = 66
-  print("修改后 complex.arr[1]:", complex.arr[1])
+  // 1. 先输入数组长度
+  len := I>["请输入元素个数：", number]
+  
+  // 2. 初始化空数组
+  arr := []
+  
+  // 3. 按索引依次填充
+  i := 0
+  L>(i < len) {
+    prompt := "请输入第" + i + "个值："
+    val    := I>[prompt, number]
+    arr[i] = val
+    i++
+  }
+  
+  // 4. 输出最终数组
+  print("输入完的数组：", arr)
 }

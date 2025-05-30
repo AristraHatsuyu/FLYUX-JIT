@@ -562,7 +562,7 @@ fn parse_binary_expr(tokens: &[Token], index: &mut usize) -> Expr {
 }
 
 fn parse_expr(tokens: &[Token], index: &mut usize) -> Expr {
-    match tokens.get(*index) {
+    let mut expr = match tokens.get(*index) {
         // Unary logical NOT: !expr
         Some(Token { kind: TokenKind::Unknown('!'), .. }) => {
             // consume '!'
@@ -621,18 +621,7 @@ fn parse_expr(tokens: &[Token], index: &mut usize) -> Expr {
                 }
             }
             *index += 1;
-            // 支持 [1,2,3][1][2] 这样的链式索引
-            let mut expr = Expr::Array(elements);
-            while matches!(tokens.get(*index), Some(Token { kind: TokenKind::LBracket, .. })) {
-                *index += 1;
-                let idx = parse_binary_expr(tokens, index);
-                if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RBracket, .. })) {
-                    panic!("Expected closing bracket ] for array index");
-                }
-                *index += 1;
-                expr = Expr::Index(Box::new(expr), Box::new(idx));
-            }
-            return expr;
+            Expr::Array(elements)
         }
         Some(Token { kind: TokenKind::LBrace, .. }) => {
             // Parse object literal: { key: value, ... }
@@ -659,10 +648,10 @@ fn parse_expr(tokens: &[Token], index: &mut usize) -> Expr {
             Expr::Object(props)
         }
         Some(Token { kind: TokenKind::Ident(id), .. }) => {
-            let id = id.clone();
+            let name = id.clone();
             *index += 1;
             // Input expression: I>[prompt?, type?, limit?]
-            if id == "I"
+            if name == "I"
                 && matches!(tokens.get(*index), Some(Token { kind: TokenKind::Unknown('>'), .. }))
                 && matches!(tokens.get(*index + 1), Some(Token { kind: TokenKind::LBracket, .. }))
             {
@@ -670,7 +659,6 @@ fn parse_expr(tokens: &[Token], index: &mut usize) -> Expr {
                 *index += 2;
                 let mut args = Vec::new();
                 let mut need_default = true;
-
                 while !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RBracket, .. })) {
                     // handle commas indicating omitted args
                     if matches!(tokens.get(*index), Some(Token { kind: TokenKind::Comma, .. })) {
@@ -701,60 +689,10 @@ fn parse_expr(tokens: &[Token], index: &mut usize) -> Expr {
             // Handle function call
             if matches!(tokens.get(*index), Some(Token { kind: TokenKind::LParen, .. })) {
                 let args = parse_call_args(tokens, index);
-                return Expr::Call(id, args);
+                Expr::Call(name, args)
+            } else {
+                Expr::Ident(name)
             }
-            // 支持 a[1][2].b[3] 这样的链式索引和属性访问
-            let mut expr = Expr::Ident(id);
-            loop {
-                if matches!(tokens.get(*index), Some(Token { kind: TokenKind::Dot, .. })) {
-                    *index += 1;
-                    let prop = match tokens.get(*index) {
-                        Some(Token { kind: TokenKind::Ident(p), .. }) => p.clone(),
-                        _ => panic!("Expected property name after '.'"),
-                    };
-                    *index += 1;
-                    expr = Expr::Access(Box::new(expr), prop);
-                } else if matches!(tokens.get(*index), Some(Token { kind: TokenKind::LBracket, .. })) {
-                    // Support append syntax arr[]: if immediately followed by ']', treat as append
-                    if matches!(tokens.get(*index + 1), Some(Token { kind: TokenKind::RBracket, .. })) {
-                        // Skip '[' and ']'
-                        *index += 2;
-                        // Use special sentinel "_append" as index
-                        expr = Expr::Index(
-                            Box::new(expr),
-                            Box::new(Expr::Ident("_append".to_string())),
-                        );
-                    } else {
-                        // Normal indexing [expr]
-                        *index += 1; // skip '['
-                        let idx = parse_binary_expr(tokens, index);
-                        if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RBracket, .. })) {
-                            panic!(
-                                "Parse error at line {}, col {}: Expected ']' after index",
-                                tokens[*index].line, tokens[*index].col
-                            );
-                        }
-                        *index += 1; // skip ']'
-                        expr = Expr::Index(Box::new(expr), Box::new(idx));
-                    }
-                } else {
-                    break;
-                }
-            }
-            // support postfix ++/--
-            if let Expr::Ident(name) = &expr {
-                if matches!(tokens.get(*index), Some(Token { kind: TokenKind::Unknown('+'), .. }))
-                    && matches!(tokens.get(*index + 1), Some(Token { kind: TokenKind::Unknown('+'), .. })) {
-                    *index += 2;
-                    return Expr::PostfixIncrement(name.clone());
-                }
-                if matches!(tokens.get(*index), Some(Token { kind: TokenKind::Unknown('-'), .. }))
-                    && matches!(tokens.get(*index + 1), Some(Token { kind: TokenKind::Unknown('-'), .. })) {
-                    *index += 2;
-                    return Expr::PostfixDecrement(name.clone());
-                }
-            }
-            return expr;
         }
         _ => {
             if let Some(tok) = tokens.get(*index) {
@@ -766,7 +704,173 @@ fn parse_expr(tokens: &[Token], index: &mut usize) -> Expr {
                 panic!("Parse error: Unexpected end of input while parsing expression");
             }
         }
+    };
+
+    // Unified suffix parsing for all expr:
+    loop {
+        match tokens.get(*index) {
+            // Pipe-only method
+            Some(Token { kind: TokenKind::Pipe, .. })
+                if matches!(tokens.get(*index + 1), Some(Token { kind: TokenKind::Ident(_), .. })) =>
+            {
+                // consume '|' token (lexed as Pipe)
+                *index += 1;
+                // method name
+                let mname = if let Some(Token { kind: TokenKind::Ident(id), .. }) =
+                    tokens.get(*index)
+                {
+                    let s = id.clone();
+                    *index += 1;
+                    s
+                } else {
+                    panic!(
+                        "Parse error at line {}, col {}: Expected method name after '|'",
+                        tokens[*index].line,
+                        tokens[*index].col
+                    );
+                };
+                // optional args
+                let mut margs = Vec::new();
+                if matches!(tokens.get(*index), Some(Token { kind: TokenKind::LParen, .. })) {
+                    *index += 1;
+                    if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RParen, .. })) {
+                        margs.push(parse_binary_expr(tokens, index));
+                        while matches!(tokens.get(*index), Some(Token { kind: TokenKind::Comma, .. }))
+                        {
+                            *index += 1;
+                            margs.push(parse_binary_expr(tokens, index));
+                        }
+                    }
+                    if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RParen, .. })) {
+                        panic!(
+                            "Parse error at line {}, col {}: Expected ')' after method args",
+                            tokens[*index].line,
+                            tokens[*index].col
+                        );
+                    }
+                    *index += 1;
+                }
+                expr = Expr::MethodCall {
+                    target: Box::new(expr),
+                    name: mname,
+                    args: margs,
+                };
+                continue;
+            }
+            // .>method or .>method(args)
+            Some(Token { kind: TokenKind::Dot, .. })
+                if matches!(
+                    tokens.get(*index + 1),
+                    Some(Token { kind: TokenKind::Unknown('>'), .. })
+                    | Some(Token { kind: TokenKind::Pipe,    .. })
+                ) =>
+            {
+                *index += 2; // skip '.' and '>' or '.|'
+                // method name
+                let mname = match tokens.get(*index) {
+                    Some(Token { kind: TokenKind::Ident(id), .. }) => {
+                        let s = id.clone();
+                        *index += 1;
+                        s
+                    }
+                    _ => panic!(
+                        "Parse error at line {}, col {}: Expected method name after .>",
+                        tokens[*index].line, tokens[*index].col
+                    ),
+                };
+
+                // optional argument list
+                let mut margs = Vec::<Expr>::new();
+                if matches!(tokens.get(*index), Some(Token { kind: TokenKind::LParen, .. }))
+                {
+                    *index += 1; // '('
+                    if !matches!(tokens.get(*index),
+                                 Some(Token { kind: TokenKind::RParen, .. }))
+                    {
+                        // at least one arg
+                        margs.push(parse_binary_expr(tokens, index));
+                        while matches!(tokens.get(*index),
+                                       Some(Token { kind: TokenKind::Comma, .. }))
+                        {
+                            *index += 1; // skip ','
+                            margs.push(parse_binary_expr(tokens, index));
+                        }
+                    }
+                    // expect ')'
+                    if !matches!(tokens.get(*index),
+                                 Some(Token { kind: TokenKind::RParen, .. }))
+                    {
+                        panic!(
+                            "Parse error at line {}, col {}: Expected ')' after arguments",
+                            tokens[*index].line, tokens[*index].col
+                        );
+                    }
+                    *index += 1; // skip ')'
+                }
+
+                // build MethodCall expr and continue suffix parsing
+                expr = Expr::MethodCall {
+                    target: Box::new(expr),
+                    name: mname,
+                    args: margs,
+                };
+                continue;
+            }
+            // regular dot property
+            Some(Token { kind: TokenKind::Dot, .. }) => {
+                *index += 1;
+                let prop = match tokens.get(*index) {
+                    Some(Token { kind: TokenKind::Ident(p), .. }) => p.clone(),
+                    _ => panic!("Expected property name after '.'"),
+                };
+                *index += 1;
+                expr = Expr::Access(Box::new(expr), prop);
+                continue;
+            }
+            // array index  []  (append handled above)
+            Some(Token { kind: TokenKind::LBracket, .. }) => {
+                if matches!(tokens.get(*index + 1),
+                            Some(Token { kind: TokenKind::RBracket, .. }))
+                {
+                    *index += 2; // '[]'
+                    expr = Expr::Index(
+                        Box::new(expr),
+                        Box::new(Expr::Ident("_append".into())),
+                    );
+                } else {
+                    *index += 1; // skip '['
+                    let idx = parse_binary_expr(tokens, index);
+                    if !matches!(
+                        tokens.get(*index),
+                        Some(Token { kind: TokenKind::RBracket, .. })
+                    ) {
+                        panic!(
+                            "Parse error at line {}, col {}: Expected ']' after index",
+                            tokens[*index].line, tokens[*index].col
+                        );
+                    }
+                    *index += 1; // skip ']'
+                    expr = Expr::Index(Box::new(expr), Box::new(idx));
+                }
+                continue;
+            }
+            _ => break,
+        }
     }
+    // support postfix ++/--
+    if let Expr::Ident(name) = &expr {
+        if matches!(tokens.get(*index), Some(Token { kind: TokenKind::Unknown('+'), .. }))
+            && matches!(tokens.get(*index + 1), Some(Token { kind: TokenKind::Unknown('+'), .. })) {
+            *index += 2;
+            return Expr::PostfixIncrement(name.clone());
+        }
+        if matches!(tokens.get(*index), Some(Token { kind: TokenKind::Unknown('-'), .. }))
+            && matches!(tokens.get(*index + 1), Some(Token { kind: TokenKind::Unknown('-'), .. })) {
+            *index += 2;
+            return Expr::PostfixDecrement(name.clone());
+        }
+    }
+    expr
 }
 
 

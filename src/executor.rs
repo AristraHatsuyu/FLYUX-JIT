@@ -1,3 +1,9 @@
+use std::fs;
+use std::collections::HashMap;
+use crate::lexer::tokenize;
+use crate::parser::parse;
+use crate::ast::{Expr, Stmt, Function};
+
 // Recursively update nested object string given a path of keys.
 fn update_object_str(s: &str, path: &[String], new_value: String) -> String {
     let mut map = parse_object_string(s);
@@ -14,8 +20,33 @@ fn update_object_str(s: &str, path: &[String], new_value: String) -> String {
     }
     serialize_object_map(&map)
 }
-use std::fs;
-use std::collections::HashMap;
+
+fn call_builtin(name: &str, args: Vec<String>) -> Option<String> {
+    match name {
+        "length" => {
+            let s = &args[0];
+            if s.starts_with('[') && s.ends_with(']') {
+                return Some(parse_array_string(s).len().to_string());
+            }
+            if s.starts_with('{') && s.ends_with('}') {
+                return Some(parse_object_string(s).len().to_string());
+            }
+            Some(s.len().to_string())
+        }
+        "sort" => {
+            let mut vec = parse_array_string(&args[0]);
+            vec.sort();                 // 简单字典序
+            Some(serialize_array_vec(&vec))
+        }
+        "push" => {
+            if args.len() < 2 { panic!("push 需要一个额外参数"); }
+            let mut vec = parse_array_string(&args[0]);
+            vec.push(args[1].clone());
+            Some(serialize_array_vec(&vec))
+        }
+        _ => None,
+    }
+}
 // Parse an object string like {"a":1,"b":2} into a HashMap<String, String>
 fn parse_object_string(s: &str) -> std::collections::HashMap<String, String> {
     let s = s.trim();
@@ -100,9 +131,6 @@ fn parse_array_string(s: &str) -> Vec<String> {
 fn serialize_array_vec(vec: &[String]) -> String {
     format!("[{}]", vec.join(","))
 }
-use crate::lexer::tokenize;
-use crate::parser::parse;
-use crate::ast::{Expr, Stmt, Function};
 
 pub enum ExecResult {
     None,
@@ -310,7 +338,7 @@ pub fn exec_with_ctx(
                     crate::ast::LoopKind::While(expr) => {
                         while {
                             let cond = eval_expr(&expr, ctx, fns);
-                            cond != "0" && cond.to_lowercase() != "false"
+                            cond != "0" && cond.to_lowercase() != "false" && cond != "<undef>"
                         } {
                             for stmt in body {
                                 exec_with_ctx(&Function {
@@ -373,7 +401,7 @@ pub fn exec_with_ctx(
 
                         while {
                             let cond_val = eval_expr(&cond, ctx, fns);
-                            cond_val != "0" && cond_val.to_lowercase() != "false"
+                            cond_val != "0" && cond_val.to_lowercase() != "false" && cond_val != "<undef>"
                         } {
                             for stmt in body {
                                 exec_with_ctx(&Function {
@@ -405,7 +433,7 @@ pub fn exec_with_ctx(
                     let passed = match cond {
                         Some(expr) => {
                             let v = eval_expr(expr, ctx, fns);
-                            v != "0" && v != "false"
+                            v != "0" && v.to_lowercase() != "false" && v != "<undef>"
                         }
                         None => true
                     };
@@ -570,6 +598,43 @@ fn eval_expr(
             // Treat empty string, "0", or "false" as false; everything else as true
             let is_truthy = !(val.is_empty() || val == "0" || val.eq_ignore_ascii_case("false"));
             (!is_truthy).to_string()
+        }
+        Expr::MethodCall { target, name, args } => {
+            // 1) 先算 target
+            let mut passed = vec![eval_expr(target, ctx, fns)];
+            // 2) 其余实参
+            for a in args {
+                passed.push(eval_expr(a, ctx, fns));
+            }
+
+            // 内置优先
+            if let Some(ret) = call_builtin(name, passed.clone()) {
+                return ret;
+            }
+
+            // 再找用户函数
+            if let Some(u) = fns.get(name) {
+                // 临时上下文，把 receiver 作为第一个形参（若存在）
+                let mut local = HashMap::new();
+                if let Some((p0, _)) = u.params.get(0) {
+                    local.insert(p0.clone(), (passed[0].clone(), None, false));
+                }
+                // 对于其余参数，无论是否传值，都绑定；缺省时用 "<undef>"
+                for (i, (pn, _)) in u.params.iter().enumerate().skip(1) {
+                    // Bind missing extra args to "<undef>" so that if(c) treats it as false
+                    let arg_val = passed
+                        .get(i)
+                        .cloned()
+                        .unwrap_or_else(|| "<undef>".to_string());
+                    local.insert(pn.clone(), (arg_val, None, false));
+                }
+                match exec_with_ctx(u, &mut local, fns) {
+                    ExecResult::Return(v) => v,
+                    _ => "<void>".into(),
+                }
+            } else {
+                panic!("Unknown method '{}'", name);
+            }
         }
         Expr::PostfixIncrement(var) => {
             // Evaluate and apply postfix increment: return new value after increment

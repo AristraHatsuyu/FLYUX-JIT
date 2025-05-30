@@ -14,6 +14,11 @@ pub enum Expr {
     Access(Box<Expr>, String),
     PostfixIncrement(String),
     PostfixDecrement(String),
+    MethodCall {
+        target: Box<Expr>,      // a 或更长链
+        name: String,           // func
+        args: Vec<Expr>,        // 附加实参（不含 target）
+    },
 }
 
 #[derive(Debug, Clone)]

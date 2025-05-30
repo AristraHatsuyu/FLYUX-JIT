@@ -1,82 +1,68 @@
+// 定义方法：自增、自减、加法、乘法
+F>increment(a){
+    R>a + 1
+}
+F>decrement(a){
+    R>a - 1
+}
+F>add(a, b, c){
+    // 若未传 b、c，可在此设默认
+    if (b) { bval := b } else { bval := 0 }
+    if (c) { cval := c } else { cval := 0 }
+    R>a + b + c
+}
+F>mul(a, b){
+    R>a * b
+}
+
+// 定义一个返回数组的函数
+F>makeArr(a, b, c){
+    R>[a, b, c]
+}
+
 F>main(){
-  // 1. 冒泡排序 Bubble Sort
-  arr1 := [5, 3, 8, 1, 4]
-  print("原始 arr1:", arr1)
-  n1 := arr1.length
-  i1 := 0
-  L>(i1 < n1 - 1){
-    j1 := 0
-    L>(j1 < n1 - i1 - 1){
-      if (arr1[j1] > arr1[j1+1]) {
-        tmp := arr1[j1]
-        arr1[j1] = arr1[j1+1]
-        arr1[j1+1] = tmp
-      }
-      j1++
-    }
-    i1++
-  }
-  print("冒泡排序后 arr1:", arr1)
+    // 1. 直接赋值给变量
+    x := 10
+    y := x.>increment        // y = 11
+    z := x.>add(2)           // z = 10 + 2 + 0 = 12
+    w := x.>add(2,3)         // w = 10 + 2 + 3 = 15
+    print("y, z, w:", y, z, w)
 
-  // 2. 选择排序 Selection Sort
-  arr2 := [64, 25, 12, 22, 11]
-  print("原始 arr2:", arr2)
-  n2 := arr2.length
-  i2 := 0
-  L>(i2 < n2 - 1){
-    min_idx := i2
-    j2 := i2 + 1
-    L>(j2 < n2){
-      if (arr2[j2] < arr2[min_idx]) {
-        min_idx = j2
-      }
-      j2++
-    }
-    // swap
-    tmp2 := arr2[i2]
-    arr2[i2] = arr2[min_idx]
-    arr2[min_idx] = tmp2
-    i2++
-  }
-  print("选择排序后 arr2:", arr2)
+    // 2. 嵌套链式赋值
+    a := 5
+    b := a.>increment.>mul(4)  // (5+1)*4 = 24
+    print("a chain:", b)
 
-  // 3. 插入排序 Insertion Sort（线性查找插入位置）
-  arr3 := [4, 2, 8, 6, 1, 3]
-  print("原始 arr3:", arr3)
-  n3 := arr3.length
-  k := 1
-  L>(k < n3){
-    key := arr3[k]
-    // find insertion position via linear search
-    pos := 0
-    L>(pos < k && arr3[pos] <= key){
-      pos++
+    // 3. 用在条件判断中
+    if (x.>decrement > 5) {
+        cond :(bool)= true
+    } else {
+        cond :(bool)= false
     }
-    // shift elements to make room
-    m := k
-    L>(m > pos){
-      arr3[m] = arr3[m-1]
-      m--
-    }
-    arr3[pos] = key
-    k++
-  }
-  print("插入排序后 arr3:", arr3)
+    print("cond (9>5):", cond) // true
 
-  // 5. 数组修改/读取/添加 操作测试
-  test := [1, 2, 3]
-  print("原始 test:", test)
-  // 读取
-  print("test[1] 读取:", test[1])
-  // 修改
-  test[1] = 22
-  print("修改 test[1]:", test[1])
-  // 追加
-  test[] = 4
-  print("追加 test[]:", test)
-  // 再次追加
-  test[] = 5
-  print("再追加 test[]:", test)
-  // 长度
-  print("test.length:", test.length)
+    // 4. 在循环中使用方法
+    cnt := 0
+    sum := 0
+    L>(cnt < 5){
+        // 每次累加 cnt.increment()
+        sum = sum + cnt.>increment
+        cnt++
+    }
+    print("sum of 1..5:", sum) // 1+2+3+4+5 = 15
+
+    // 5. 将方法返回值再做变量解包
+    arr := makeArr(1,2,3)
+    lenArr := arr.>length      // 3
+    first := arr[0]
+    last  := arr[arr.>length - 1]
+    print("arr, len, first, last:", arr, lenArr, first, last)
+
+    // 6. 在函数返回值后续调用
+    val := x.>add(1,2).>mul(3)  // (10+1+2)*3 = 39
+    print("chained call:", val)
+
+    // 7. 复杂链式混合
+    complex := 2.>add(3).>mul(4).>increment  // ((2+3)*4)+1 = 21
+    print("complex:", complex)
 }

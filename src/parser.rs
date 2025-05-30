@@ -299,6 +299,25 @@ fn parse_stmt(tokens: &[Token], index: &mut usize) -> Stmt {
         }
     }
 
+    // ─── 对象属性 / 索引赋值 ─────────────────────────────────────────────
+    if matches!(tokens.get(*index), Some(Token { kind: TokenKind::Ident(_), .. })) {
+        let backup = *index;
+        let lhs_expr = parse_expr(tokens, index);
+
+        // 只有当 lhs_expr 为访问属性或数组索引时，才认为是属性赋值
+        if (matches!(lhs_expr, Expr::Access(_, _) | Expr::Index(_, _)))
+            && (matches!(tokens.get(*index), Some(Token { kind: TokenKind::Assign, .. }))
+                || matches!(tokens.get(*index), Some(Token { kind: TokenKind::Eq, .. })))
+        {
+            *index += 1; // 跳过 := 或 =
+            let rhs = parse_binary_expr(tokens, index);
+            return Stmt::PropAssign(Box::new(lhs_expr), rhs);
+        } else {
+            // 不是属性赋值，回退到解析前
+            *index = backup;
+        }
+    }
+
     // ✅ 变量/常量定义语句和普通变量赋值
     if let Some(Token { kind: TokenKind::Ident(name), .. }) = tokens.get(*index) {
         let name = name.clone();
@@ -621,6 +640,43 @@ fn parse_expr(tokens: &[Token], index: &mut usize) -> Expr {
         Some(Token { kind: TokenKind::Ident(id), .. }) => {
             let id = id.clone();
             *index += 1;
+            // Input expression: I>[prompt?, type?, limit?]
+            if id == "I"
+                && matches!(tokens.get(*index), Some(Token { kind: TokenKind::Unknown('>'), .. }))
+                && matches!(tokens.get(*index + 1), Some(Token { kind: TokenKind::LBracket, .. }))
+            {
+                // consume '>' and '['
+                *index += 2;
+                let mut args = Vec::new();
+                let mut need_default = true;
+
+                while !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RBracket, .. })) {
+                    // handle commas indicating omitted args
+                    if matches!(tokens.get(*index), Some(Token { kind: TokenKind::Comma, .. })) {
+                        if need_default {
+                            args.push(Expr::Str("".into()));
+                        }
+                        *index += 1;
+                        need_default = true;
+                        continue;
+                    }
+                    // parse provided argument
+                    args.push(parse_binary_expr(tokens, index));
+                    need_default = false;
+                    // skip optional comma
+                    if matches!(tokens.get(*index), Some(Token { kind: TokenKind::Comma, .. })) {
+                        *index += 1;
+                        need_default = true;
+                    }
+                }
+                // pad defaults up to three args
+                while args.len() < 3 {
+                    args.push(Expr::Str("".into()));
+                }
+                // consume ']'
+                *index += 1;
+                return Expr::Input(args);
+            }
             // Handle function call
             if matches!(tokens.get(*index), Some(Token { kind: TokenKind::LParen, .. })) {
                 let args = parse_call_args(tokens, index);

@@ -3,6 +3,7 @@ pub enum Expr {
     Number(f64),
     Str(String),
     Ident(String),
+    Input(Vec<Expr>), 
     Call(String, Vec<Expr>),
     Binary(Box<Expr>, String, Box<Expr>),
     Logical(String, Box<Expr>, Box<Expr>),
@@ -31,6 +32,7 @@ pub enum Stmt {
     Assign(String, Expr),
     Increment(String),
     Decrement(String),
+    PropAssign(Box<Expr>, Expr),
     #[allow(dead_code)]
     Expr(Expr),
     Return(Expr),

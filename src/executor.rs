@@ -1,5 +1,105 @@
+// Recursively update nested object string given a path of keys.
+fn update_object_str(s: &str, path: &[String], new_value: String) -> String {
+    let mut map = parse_object_string(s);
+    if path.len() == 1 {
+        map.insert(path[0].clone(), new_value);
+    } else {
+        let key = &path[0];
+        if let Some(inner_str) = map.get(key) {
+            let updated = update_object_str(inner_str, &path[1..], new_value);
+            map.insert(key.clone(), updated);
+        } else {
+            panic!("Key '{}' not found during nested assignment", key);
+        }
+    }
+    serialize_object_map(&map)
+}
 use std::fs;
 use std::collections::HashMap;
+// Parse an object string like {"a":1,"b":2} into a HashMap<String, String>
+fn parse_object_string(s: &str) -> std::collections::HashMap<String, String> {
+    let s = s.trim();
+    if !s.starts_with('{') || !s.ends_with('}') {
+        panic!("Not an object string: '{}'", s);
+    }
+    let inner = &s[1..s.len()-1];
+    let mut map = HashMap::new();
+    let mut depth = 0;
+    let mut current = String::new();
+    let mut entries = vec![];
+    for c in inner.chars() {
+        match c {
+            '{' | '[' => {
+                depth += 1;
+                current.push(c);
+            }
+            '}' | ']' => {
+                depth -= 1;
+                current.push(c);
+            }
+            ',' if depth == 0 => {
+                entries.push(current.trim().to_string());
+                current.clear();
+            }
+            _ => current.push(c),
+        }
+    }
+    if !current.trim().is_empty() {
+        entries.push(current.trim().to_string());
+    }
+    for kv in entries {
+        if let Some((k, v)) = kv.split_once(':') {
+            let parsed_key = k.trim().trim_matches('"').to_string();
+            let val = v.trim().to_string();
+            map.insert(parsed_key, val);
+        }
+    }
+    map
+}
+
+fn serialize_object_map(map: &std::collections::HashMap<String, String>) -> String {
+    let kvs: Vec<String> = map.iter()
+        .map(|(k, v)| format!("\"{}\":{}", k, v))
+        .collect();
+    format!("{{{}}}", kvs.join(","))
+}
+
+// Parse an array string like [1,2,3] into Vec<String>
+fn parse_array_string(s: &str) -> Vec<String> {
+    let s = s.trim();
+    if !s.starts_with('[') || !s.ends_with(']') {
+        panic!("Not an array string: '{}'", s);
+    }
+    let trimmed = &s[1..s.len()-1];
+    let mut elements = vec![];
+    let mut current = String::new();
+    let mut depth = 0;
+    for c in trimmed.chars() {
+        match c {
+            '{' | '[' => {
+                depth += 1;
+                current.push(c);
+            }
+            '}' | ']' => {
+                depth -= 1;
+                current.push(c);
+            }
+            ',' if depth == 0 => {
+                elements.push(current.trim().to_string());
+                current.clear();
+            }
+            _ => current.push(c),
+        }
+    }
+    if !current.trim().is_empty() {
+        elements.push(current.trim().to_string());
+    }
+    elements
+}
+
+fn serialize_array_vec(vec: &[String]) -> String {
+    format!("[{}]", vec.join(","))
+}
 use crate::lexer::tokenize;
 use crate::parser::parse;
 use crate::ast::{Expr, Stmt, Function};
@@ -360,6 +460,58 @@ pub fn exec_with_ctx(
                 };
                 ctx.insert(var.clone(), (new_str, typ.clone(), is_const));
             }
+            Stmt::PropAssign(lhs, rhs) => {
+                // Evaluate right-hand side
+                let val_str = eval_expr(rhs, ctx, fns);
+
+                // Determine left-hand side
+                match lhs.as_ref() {
+                    // Support nested property assignment: obj.field, obj.field1.field2, etc.
+                    Expr::Access(_, _) => {
+                        // Build path from nested Access
+                        let mut path = Vec::new();
+                        let mut expr = lhs.as_ref();
+                        while let Expr::Access(inner, field) = expr {
+                            path.push(field.clone());
+                            expr = inner.as_ref();
+                        }
+                        // Reverse so that path[0] is the top-level key
+                        path.reverse();
+                        // expr should now be the root identifier
+                        if let Expr::Ident(root) = expr {
+                            if let Some(ctx_val) = ctx.get_mut(root) {
+                                let new_obj = update_object_str(&ctx_val.0, &path, val_str.clone());
+                                ctx_val.0 = new_obj;
+                            } else {
+                                panic!("'{}' is not found for nested assignment", root);
+                            }
+                        } else {
+                            panic!("Invalid nested left-hand side: {:?}", lhs);
+                        }
+                    }
+                    // arr[index]
+                    Expr::Index(arr_expr, idx_expr) => {
+                        if let Expr::Ident(arr_name) = arr_expr.as_ref() {
+                            let idx = eval_expr(idx_expr, ctx, fns)
+                                .parse::<usize>()
+                                .unwrap_or_else(|_| panic!("Invalid index for '{}'", arr_name));
+                            if let Some(ctx_val) = ctx.get_mut(arr_name) {
+                                let mut vec = parse_array_string(&ctx_val.0);
+                                if idx >= vec.len() {
+                                    panic!("Index {} out of bounds for '{}'", idx, arr_name);
+                                }
+                                vec[idx] = val_str.clone();
+                                ctx_val.0 = serialize_array_vec(&vec);
+                            } else {
+                                panic!("'{}' is not an array", arr_name);
+                            }
+                        } else {
+                            panic!("Invalid array target: {:?}", arr_expr);
+                        }
+                    }
+                    _ => panic!("Invalid left-hand side in property assignment: {:?}", lhs),
+                }
+            }
             _ => {}
         }
     }
@@ -434,6 +586,52 @@ fn eval_expr(
                 }
             }
         },
+        Expr::Input(args) => {
+            // 参数默认值
+            let prompt = if let Some(p) = args.get(0) {
+                eval_expr(p, ctx, fns)
+            } else { "".to_string() };
+
+            let in_type = if let Some(t) = args.get(1) {
+                match t {
+                    Expr::Ident(s) => s.to_lowercase(),
+                    _ => eval_expr(t, ctx, fns).to_lowercase(),
+                }
+            } else {
+                "text".into()
+            };
+
+            let limit: usize = if let Some(lim) = args.get(2) {
+                eval_expr(lim, ctx, fns).parse::<usize>().unwrap_or(0)
+            } else { 0 };
+
+            use std::io::{self, Write};
+            print!("{}", prompt);
+            io::stdout().flush().ok();
+
+            let mut buf = String::new();
+            io::stdin().read_line(&mut buf).unwrap();
+            let mut input = buf.trim_end().to_string();
+
+            if limit != 0 && input.len() > limit {
+                input.truncate(limit);
+            }
+
+            match in_type.as_str() {
+                "number" => {
+                    // 尝试 int，再尝试 float
+                    if let Ok(i) = input.parse::<i64>() {
+                        i.to_string()
+                    } else if let Ok(f) = input.parse::<f64>() {
+                        f.to_string()
+                    } else {
+                        "0".into() // 解析失败回退
+                    }
+                }
+                // text 或 password 都返回字符串
+                _ => input,
+            }
+        }
         Expr::Call(name, args) => {
             if let Some(f) = fns.get(name) {
                 let mut local_ctx = HashMap::new();

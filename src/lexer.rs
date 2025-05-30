@@ -12,6 +12,7 @@ pub enum TokenKind {
     Loop,
     Pipe,
     BindOne,
+    #[allow(dead_code)]
     BindTwo,
     Assign,
     ForceAssign,
@@ -89,20 +90,14 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                 }
             }
             '<' => {
-                chars.next();
-                col += 1;
+                chars.next(); col += 1;
                 if chars.peek() == Some(&'=') {
-                    chars.next();
-                    col += 1;
-                    if chars.peek() == Some(&'>') {
-                        chars.next();
-                        col += 1;
-                        tokens.push(Token { kind: TokenKind::BindTwo, line: token_line, col: token_col });
-                    } else {
-                        tokens.push(Token { kind: TokenKind::Unknown('<'), line: token_line, col: token_col }); // treat <= as <
-                    }
+                    // Emit '<' then '=' as separate tokens for <=
+                    tokens.push(Token { kind: TokenKind::Unknown('<'), line: token_line, col: token_col });
+                    chars.next(); col += 1;
+                    tokens.push(Token { kind: TokenKind::Eq,      line: token_line, col: token_col + 1 });
                 } else {
-                    tokens.push(Token { kind: TokenKind::Unknown('<'), line: token_line, col: token_col }); // handle lone <
+                    tokens.push(Token { kind: TokenKind::Unknown('<'), line: token_line, col: token_col });
                 }
             }
             '.' => {
@@ -119,7 +114,16 @@ pub fn tokenize(input: &str) -> Vec<Token> {
             '+' => { tokens.push(Token { kind: TokenKind::Unknown('+'), line: token_line, col: token_col }); chars.next(); col += 1; },
             '-' => { tokens.push(Token { kind: TokenKind::Unknown('-'), line: token_line, col: token_col }); chars.next(); col += 1; },
             '*' => { tokens.push(Token { kind: TokenKind::Unknown('*'), line: token_line, col: token_col }); chars.next(); col += 1; },
-            '>' => { tokens.push(Token { kind: TokenKind::Unknown('>'), line: token_line, col: token_col }); chars.next(); col += 1; },
+            '>' => {
+                chars.next(); col += 1;
+                if chars.peek() == Some(&'=') {
+                    tokens.push(Token { kind: TokenKind::Unknown('>'), line: token_line, col: token_col });
+                    chars.next(); col += 1;
+                    tokens.push(Token { kind: TokenKind::Eq,      line: token_line, col: token_col + 1 });
+                } else {
+                    tokens.push(Token { kind: TokenKind::Unknown('>'), line: token_line, col: token_col });
+                }
+            }
             '/' => {
                 chars.next();
                 col += 1;

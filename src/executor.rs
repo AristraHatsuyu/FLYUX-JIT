@@ -84,8 +84,8 @@ pub fn exec_with_ctx(
                 if expected_type == "bool" {
                     let normalized = val.trim_matches('"').to_lowercase();
                     val = match normalized.as_str() {
-                        "true" | "1" => "1".to_string(),
-                        "false" | "0" => "0".to_string(),
+                        "true" | "1" => "true".to_string(),
+                        "false" | "0" => "false".to_string(),
                         _ => panic!("Invalid boolean literal: '{}'", val),
                     };
                 } else if expected_type == "int" {
@@ -162,7 +162,6 @@ pub fn exec_with_ctx(
                 let value = eval_expr(expr, ctx, fns);
                 if let Some((_, typ, is_const)) = ctx.get(name) {
                     if *is_const {
-                        println!("Assign attempt to '{}', context entry: {:?}", name, ctx.get(name)); // 调试输出
                         panic!("Cannot assign to constant '{}'", name);
                     }
                     let enforced = if let Some(t) = typ {
@@ -173,8 +172,8 @@ pub fn exec_with_ctx(
                         } else if t == "bool" {
                             let v = value.to_lowercase();
                             match v.as_str() {
-                                "true" | "1" => "1".to_string(),
-                                "false" | "0" => "0".to_string(),
+                                "true" | "1"  => "true".to_string(),
+                                "false" | "0" => "false".to_string(),
                                 _ => panic!("Type mismatch: expected bool, got '{}'", value)
                             }
                         } else if t == "string" {
@@ -266,7 +265,6 @@ pub fn exec_with_ctx(
                         }
                     }
                     crate::ast::LoopKind::For(init, cond, step) => {
-                        // Execute the initialization statement
                         exec_with_ctx(&Function {
                             name: "<for-init>".into(),
                             params: vec![],
@@ -324,7 +322,7 @@ pub fn exec_with_ctx(
                 }
             }
             Stmt::Increment(var) => {
-                println!("DEBUG: Incrementing '{}' from {:?}", var, ctx.get(var).unwrap());
+                // println!("DEBUG: Incrementing '{}' from {:?}", var, ctx.get(var).unwrap());
                 let (current_str, typ, is_const) = ctx.get(var)
                     .expect(&format!("Variable '{}' not found for increment", var))
                     .clone();
@@ -452,20 +450,26 @@ fn eval_expr(
             }
         }
         Expr::Binary(lhs, op, rhs) => {
-            let l = eval_expr(lhs, ctx, fns);
-            let r = eval_expr(rhs, ctx, fns);
-            let lnum = l.parse::<f64>().unwrap_or(0.0);
-            let rnum = r.parse::<f64>().unwrap_or(0.0);
-            match op.as_str() {
-                "+" => format!("{}", lnum + rnum),
-                "-" => format!("{}", lnum - rnum),
-                "*" => format!("{}", lnum * rnum),
-                "/" => format!("{}", if rnum != 0.0 { lnum / rnum } else { 0.0 }),
-                ">" => (lnum > rnum).to_string(),
-                "<" => (lnum < rnum).to_string(),
-                "=" => (l == r).to_string(),
-                _ => "<bad-op>".to_string()
-            }
+            let l_str = eval_expr(lhs, ctx, fns);
+            let r_str = eval_expr(rhs, ctx, fns);
+            let lnum = l_str.parse::<f64>().unwrap_or(0.0);
+            let rnum = r_str.parse::<f64>().unwrap_or(0.0);
+            let result = match op.as_str() {
+                "+"  => format!("{}", lnum + rnum),
+                "-"  => format!("{}", lnum - rnum),
+                "*"  => format!("{}", lnum * rnum),
+                "/"  => format!("{}", if rnum != 0.0 { lnum / rnum } else { 0.0 }),
+                ">"  => (lnum >  rnum).to_string(),
+                "<"  => (lnum <  rnum).to_string(),
+                "="  => (l_str == r_str).to_string(),        // 如果单等号当作等于
+                "==" => (l_str == r_str).to_string(),
+                "<=" => (lnum <= rnum).to_string(),
+                ">=" => (lnum >= rnum).to_string(),
+                _other => {
+                    "<bad-op>".to_string()
+                }
+            };
+            result
         }
         Expr::Logical(op, left, right) => {
             let l = eval_expr(left, ctx, fns) == "true";

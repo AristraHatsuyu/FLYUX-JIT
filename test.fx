@@ -1,27 +1,18 @@
 F>main(){
-  🚀 := 0
-  🔢 := 3
+  // 链式比较自动转换为 &&
+  c1:(bool)= 1<2<3
+  print(c1)
+  c2:(bool)= 5>4>2
+  print(c2)
+  c3:(bool)= 10>5>2<4  // 10>5 && 5>2 && 2<4
+  print(c3)
 
-  // Postfix in print
-  print("Launch:", 🚀++, "Altitude:", 🚀)
-
-  // Arithmetic combination
-  result := 🚀 * 🔢++
-  print("Result of 🚀 * 🔢++:", result, "🔢 now:", 🔢)
-
-  // Nested postfix operations
-  x := 1
-  y := x++ + x++
-  print("y = x++ + x++:", y, "final x:", x)
-
-  // Loop with postfix decrement
-  
-  print("Countdown:")
-  L>(counter:=3;counter>0;counter--) {
-    print(counter)
+  // 循环中链式比较
+  sum:[int]= 0
+  print("loop start")
+  L>(sum<3<5){
+    sum++
+    print(sum)
   }
-
-  // Emoji in complex condition
-  α := 0
-  print("Condition (α++ < 2):", α++ < 2, "α now:", α)
+  print("loop end sum=", sum)
 }

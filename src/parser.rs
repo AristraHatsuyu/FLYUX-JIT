@@ -452,43 +452,79 @@ fn parse_binary_expr(tokens: &[Token], index: &mut usize) -> Expr {
     let mut exprs = Vec::new();
     let mut ops = Vec::new();
 
+    // 首先解析左侧表达式
     exprs.push(parse_expr(tokens, index));
 
+    // 不断尝试读取运算符和右侧表达式
     while let Some(op_token) = tokens.get(*index) {
-        let op_str = match op_token {
-            Token { kind: TokenKind::Unknown('+'), .. } => "+",
-            Token { kind: TokenKind::Unknown('-'), .. } => "-",
-            Token { kind: TokenKind::Unknown('*'), .. } => "*",
-            Token { kind: TokenKind::Unknown('/'), .. } => "/",
-            Token { kind: TokenKind::Unknown('>'), .. } => ">",
-            Token { kind: TokenKind::Unknown('<'), .. } => "<",
-            Token { kind: TokenKind::Eq, .. } => "=",
-            _ => break,
-        }.to_string();
 
-        *index += 1;
+        // 检测两字符运算符 <=, >=, ==  
+        let op_str = if matches!(op_token, Token { kind: TokenKind::Unknown('<'), .. })
+            && (matches!(tokens.get(*index + 1), Some(Token { kind: TokenKind::Unknown('='), .. }) 
+                 | Some(Token { kind: TokenKind::Eq, .. })))
+        {
+            *index += 2;
+            "<=".to_string()
+        } else if matches!(op_token, Token { kind: TokenKind::Unknown('>'), .. })
+            && (matches!(tokens.get(*index + 1), Some(Token { kind: TokenKind::Unknown('='), .. }) 
+                 | Some(Token { kind: TokenKind::Eq, .. })))
+        {
+            *index += 2;
+            ">=".to_string()
+        } else if matches!(op_token, Token { kind: TokenKind::Eq, .. })
+            && tokens.get(*index + 1) == Some(&Token { kind: TokenKind::Eq, line: op_token.line, col: op_token.col + 1 })
+        {
+            *index += 2;
+            "==".to_string()
+        } else {
+            // 单字符运算符
+            let single = match op_token.kind {
+                TokenKind::Unknown('+') => "+",
+                TokenKind::Unknown('-') => "-",
+                TokenKind::Unknown('*') => "*",
+                TokenKind::Unknown('/') => "/",
+                TokenKind::Unknown('>') => ">",
+                TokenKind::Unknown('<') => "<",
+                TokenKind::Eq         => "=",
+                _ => {
+                    break;
+                }
+            };
+            *index += 1;
+            single.to_string()
+        };
+
+        // 解析右侧表达式
         let next_expr = parse_expr(tokens, index);
 
-        // 链式比较符（> < =），累积表达式，等会用逻辑与连接
-        if op_str == ">" || op_str == "<" || op_str == "=" {
+        // 判断是否为比较运算符，以决定是否链式
+        if ["<", ">", "=", "<=", ">=", "=="].contains(&op_str.as_str()) {
             exprs.push(next_expr);
             ops.push(op_str);
         } else {
-            // 普通算术二元操作：构造二元表达式
+            // 普通算术：立刻构建节点
             let left = exprs.pop().unwrap();
             exprs.push(Expr::Binary(Box::new(left), op_str, Box::new(next_expr)));
         }
     }
 
-    // 没有链式比较，直接返回最后表达式
+    // 如果没有链式比较，直接返回最后一个表达式
     if ops.is_empty() {
         return exprs.pop().unwrap();
     }
 
-    // 构造链式比较逻辑 ((a > b) && (b > c)) 的结构
-    let mut result = Expr::Binary(Box::new(exprs[0].clone()), ops[0].clone(), Box::new(exprs[1].clone()));
+    // 构造链式比较 ((a>b)&&(b>c)&&…)
+    let mut result = Expr::Binary(
+        Box::new(exprs[0].clone()),
+        ops[0].clone(),
+        Box::new(exprs[1].clone()),
+    );
     for i in 1..ops.len() {
-        let cmp = Expr::Binary(Box::new(exprs[i].clone()), ops[i].clone(), Box::new(exprs[i + 1].clone()));
+        let cmp = Expr::Binary(
+            Box::new(exprs[i].clone()),
+            ops[i].clone(),
+            Box::new(exprs[i + 1].clone()),
+        );
         result = Expr::Logical("&&".to_string(), Box::new(result), Box::new(cmp));
     }
     result
@@ -658,38 +694,87 @@ fn parse_loop_stmt(tokens: &[Token], index: &mut usize) -> Stmt {
             }
         }
         Some(Token { kind: TokenKind::LParen, .. }) => {
-            *index += 1;
-            let mut parts = Vec::new();
-            while !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RParen, .. }))
-                && !matches!(tokens.get(*index), Some(Token { kind: TokenKind::LBrace, .. }))
-            {
-                parts.push(parse_binary_expr(tokens, index));
-                // Only advance on semicolon if present; do not require it
-                if matches!(tokens.get(*index), Some(Token { kind: TokenKind::Semicolon, .. })) {
-                    *index += 1;
-                } else if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RParen, .. }))
-                    && !matches!(tokens.get(*index), Some(Token { kind: TokenKind::LBrace, .. }))
-                {
-                    panic!("Expected ';', ')', or '{{' in loop header");
+            // Decide While vs For by counting semicolons up to the matching RParen
+            let mut semi_count = 0;
+            let mut depth = 1;
+            for look in (*index + 1)..tokens.len() {
+                match tokens.get(look) {
+                    Some(Token { kind: TokenKind::LParen, .. }) => depth += 1,
+                    Some(Token { kind: TokenKind::RParen, .. }) => {
+                        depth -= 1;
+                        if depth == 0 { break; }
+                    }
+                    Some(Token { kind: TokenKind::Semicolon, .. }) 
+                    | Some(Token { kind: TokenKind::Unknown(';'), .. }) if depth == 1 => semi_count += 1,
+                    _ => {}
                 }
             }
-            // Accept closing ) if present
-            if matches!(tokens.get(*index), Some(Token { kind: TokenKind::RParen, .. })) {
+            let is_for = semi_count == 2;
+
+
+            *index += 1;
+            let mut parts = Vec::new();
+            if !is_for {
+                // While-style: parse a single expression as condition
+                while !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RParen, .. }))
+                    && !matches!(tokens.get(*index), Some(Token { kind: TokenKind::LBrace, .. }))
+                {
+                    parts.push(parse_binary_expr(tokens, index));
+                    // Only advance on semicolon if present; do not require it
+                    if matches!(tokens.get(*index), Some(Token { kind: TokenKind::Semicolon, .. })) 
+                        || matches!(tokens.get(*index), Some(Token { kind: TokenKind::Unknown(';'), .. })) {
+                        *index += 1;
+                    } else if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RParen, .. }))
+                        && !matches!(tokens.get(*index), Some(Token { kind: TokenKind::LBrace, .. }))
+                    {
+                        // Enhance debug info before panicking
+                        println!("DEBUG parse_loop_stmt unexpected token at index {}: {:?}", index, tokens.get(*index));
+                        if let Some(tok) = tokens.get(*index) {
+                            println!("  Token detail - kind: {:?}, line: {}, col: {}", tok.kind, tok.line, tok.col);
+                        }
+                        println!("  Next tokens: {:?}", tokens.get(*index+1));
+                        panic!("Expected ';', ')', or '{{' in loop header");
+                    }
+                }
+                // Accept closing ) if present
+                if matches!(tokens.get(*index), Some(Token { kind: TokenKind::RParen, .. })) {
+                    *index += 1;
+                }
+                if parts.len() != 1 {
+                    panic!("Invalid while-loop header: expected 1 condition expression");
+                }
+                LoopKind::While(parts.remove(0))
+            } else {
+                // For-style: parse init; cond; step
+                // Parse init statement
+                let init = {
+                    let stmt = parse_stmt(tokens, index);
+                    Box::new(stmt)
+                };
+                // require semicolon
+                if !(matches!(tokens.get(*index), Some(Token { kind: TokenKind::Semicolon, .. })) 
+                    || matches!(tokens.get(*index), Some(Token { kind: TokenKind::Unknown(';'), .. }))) {
+                    panic!("Expected ';' after init in for-loop header");
+                }
                 *index += 1;
+                // parse condition
+                let cond = parse_binary_expr(tokens, index);
+                if !(matches!(tokens.get(*index), Some(Token { kind: TokenKind::Semicolon, .. })) 
+                    || matches!(tokens.get(*index), Some(Token { kind: TokenKind::Unknown(';'), .. }))) {
+                    panic!("Expected ';' after condition in for-loop header");
+                }
+                *index += 1;
+                // parse step statement
+                let step = {
+                    let stmt = parse_stmt(tokens, index);
+                    Box::new(stmt)
+                };
+                // Accept closing ) if present
+                if matches!(tokens.get(*index), Some(Token { kind: TokenKind::RParen, .. })) {
+                    *index += 1;
+                }
+                LoopKind::For(init, cond, step)
             }
-            let loop_kind = match parts.len() {
-                1 => LoopKind::While(parts.remove(0)),
-                3 => {
-                    let init_expr = parts.remove(0);
-                    let cond_expr = parts.remove(0);
-                    let step_expr = parts.remove(0);
-                    let init_stmt = Box::new(Stmt::Expr(init_expr));
-                    let step_stmt = Box::new(Stmt::Expr(step_expr));
-                    LoopKind::For(init_stmt, cond_expr, step_stmt)
-                },
-                _ => panic!("Invalid loop condition count: expected 1 (while) or 3 (for)"),
-            };
-            loop_kind
         }
         _ => panic!("Unknown loop format"),
     };

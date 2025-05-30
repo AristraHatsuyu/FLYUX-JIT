@@ -465,6 +465,17 @@ fn eval_expr(
                 "==" => (l_str == r_str).to_string(),
                 "<=" => (lnum <= rnum).to_string(),
                 ">=" => (lnum >= rnum).to_string(),
+                "&&" => {
+                    // 非零 / 非 "false" 视为真
+                    let lbool = !(l_str == "0" || l_str.eq_ignore_ascii_case("false"));
+                    let rbool = !(r_str == "0" || r_str.eq_ignore_ascii_case("false"));
+                    if lbool && rbool { "true".into() } else { "false".into() }
+                }
+                "||" => {
+                    let lbool = !(l_str == "0" || l_str.eq_ignore_ascii_case("false"));
+                    let rbool = !(r_str == "0" || r_str.eq_ignore_ascii_case("false"));
+                    if lbool || rbool { "true".into() } else { "false".into() }
+                }
                 _other => {
                     "<bad-op>".to_string()
                 }
@@ -528,7 +539,9 @@ fn eval_expr(
                 if let Some(value) = map.get(&key) {
                     value.clone()
                 } else {
-                    panic!("Key '{}' not found in object: {}", key, target_str)
+                    // fallback: return "" instead of panic
+                    // println!("Key '{}' not found in object: {}", key, target_str);
+                    "".to_string()
                 }
             } else if target_str.starts_with('[') && target_str.ends_with(']') {
                 // Handle array-style index with nested structure parsing
@@ -561,12 +574,16 @@ fn eval_expr(
                 }
 
                 if idx >= elements.len() {
-                    panic!("Array index out of bounds: {}", idx);
+                    // fallback: return "" instead of panic
+                    // panic!("Array index out of bounds: {}", idx);
+                    "".to_string()
+                } else {
+                    elements[idx].to_string()
                 }
-
-                elements[idx].to_string()
             } else {
-                panic!("Unsupported index target: {}", target_str)
+                // fallback: return "" instead of panic
+                // panic!("Unsupported index target: {}", target_str)
+                "".to_string()
             }
         }
         Expr::Access(obj_expr, prop) => {

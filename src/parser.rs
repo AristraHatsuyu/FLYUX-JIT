@@ -458,24 +458,34 @@ fn parse_binary_expr(tokens: &[Token], index: &mut usize) -> Expr {
     // 不断尝试读取运算符和右侧表达式
     while let Some(op_token) = tokens.get(*index) {
 
-        // 检测两字符运算符 <=, >=, ==  
+        // 检测两字符运算符 <=, >=, ==, &&, ||
         let op_str = if matches!(op_token, Token { kind: TokenKind::Unknown('<'), .. })
-            && (matches!(tokens.get(*index + 1), Some(Token { kind: TokenKind::Unknown('='), .. }) 
-                 | Some(Token { kind: TokenKind::Eq, .. })))
+            && (matches!(tokens.get(*index + 1), Some(Token { kind: TokenKind::Unknown('='), .. }))
+                 || matches!(tokens.get(*index + 1), Some(Token { kind: TokenKind::Eq, .. })))
         {
             *index += 2;
             "<=".to_string()
         } else if matches!(op_token, Token { kind: TokenKind::Unknown('>'), .. })
-            && (matches!(tokens.get(*index + 1), Some(Token { kind: TokenKind::Unknown('='), .. }) 
-                 | Some(Token { kind: TokenKind::Eq, .. })))
+            && (matches!(tokens.get(*index + 1), Some(Token { kind: TokenKind::Unknown('='), .. }))
+                 || matches!(tokens.get(*index + 1), Some(Token { kind: TokenKind::Eq, .. })))
         {
             *index += 2;
             ">=".to_string()
         } else if matches!(op_token, Token { kind: TokenKind::Eq, .. })
-            && tokens.get(*index + 1) == Some(&Token { kind: TokenKind::Eq, line: op_token.line, col: op_token.col + 1 })
+            && matches!(tokens.get(*index + 1), Some(Token { kind: TokenKind::Eq, .. }))
         {
             *index += 2;
             "==".to_string()
+        } else if matches!(op_token, Token { kind: TokenKind::Unknown('&'), .. })
+            && matches!(tokens.get(*index + 1), Some(Token { kind: TokenKind::Unknown('&'), .. }))
+        {
+            *index += 2;
+            "&&".to_string()
+        } else if matches!(op_token, Token { kind: TokenKind::Unknown('|'), .. })
+            && matches!(tokens.get(*index + 1), Some(Token { kind: TokenKind::Unknown('|'), .. }))
+        {
+            *index += 2;
+            "||".to_string()
         } else {
             // 单字符运算符
             let single = match op_token.kind {
@@ -485,6 +495,8 @@ fn parse_binary_expr(tokens: &[Token], index: &mut usize) -> Expr {
                 TokenKind::Unknown('/') => "/",
                 TokenKind::Unknown('>') => ">",
                 TokenKind::Unknown('<') => "<",
+                TokenKind::Unknown('&') => "&",
+                TokenKind::Unknown('|') => "|",
                 TokenKind::Eq         => "=",
                 _ => {
                     break;
@@ -497,8 +509,8 @@ fn parse_binary_expr(tokens: &[Token], index: &mut usize) -> Expr {
         // 解析右侧表达式
         let next_expr = parse_expr(tokens, index);
 
-        // 判断是否为比较运算符，以决定是否链式
-        if ["<", ">", "=", "<=", ">=", "=="].contains(&op_str.as_str()) {
+        // 判断是否为比较或逻辑运算符，以决定是否链式
+        if ["<", ">", "=", "<=", ">=", "==", "&&", "||"].contains(&op_str.as_str()) {
             exprs.push(next_expr);
             ops.push(op_str);
         } else {
@@ -532,6 +544,24 @@ fn parse_binary_expr(tokens: &[Token], index: &mut usize) -> Expr {
 
 fn parse_expr(tokens: &[Token], index: &mut usize) -> Expr {
     match tokens.get(*index) {
+        // Parentheses grouping: (expr)
+        Some(Token { kind: TokenKind::LParen, .. }) => {
+            // Consume '('
+            *index += 1;
+            // Parse inner expression
+            let inner = parse_binary_expr(tokens, index);
+            // Expect ')'
+            if !matches!(tokens.get(*index), Some(Token { kind: TokenKind::RParen, .. })) {
+                panic!(
+                    "Parse error at line {}, col {}: Expected ')' to close grouping",
+                    tokens[*index].line,
+                    tokens[*index].col
+                );
+            }
+            *index += 1;
+            // Return grouped expr
+            return inner;
+        }
         Some(Token { kind: TokenKind::Number(n), .. }) => {
             *index += 1;
             Expr::Number(*n)

@@ -124,6 +124,24 @@ pub fn tokenize(input: &str) -> Vec<Token> {
                     tokens.push(Token { kind: TokenKind::Unknown('>'), line: token_line, col: token_col });
                 }
             }
+            '&' => {
+                tokens.push(Token {
+                    kind: TokenKind::Unknown('&'),
+                    line: token_line,
+                    col: token_col,
+                });
+                chars.next();
+                col += 1;
+            }
+            '|' => {
+                tokens.push(Token {
+                    kind: TokenKind::Unknown('|'),
+                    line: token_line,
+                    col: token_col,
+                });
+                chars.next();
+                col += 1;
+            }
             '/' => {
                 chars.next();
                 col += 1;

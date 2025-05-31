@@ -63,6 +63,7 @@ F>main(){
     print("chained call:", val)
 
     // 7. 复杂链式混合
-    complex := 2.>add(3).>mul(4).>increment  // ((2+3)*4)+1 = 21
+    i := 2
+    complex := i.>add(3).>mul(4).>increment  // ((2+3)*4)+1 = 21
     print("complex:", complex)
 }

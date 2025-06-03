@@ -1,4 +1,4 @@
-# FLYUX Programming Language (JIT Version)
+# FLYUX Programming Language (Interpreter Version)
 
 FLYUX is a minimalist yet powerful programming language designed for clear syntax, expressive code, and unique language features. FLYUX simplifies complex programming tasks with intuitive constructs and native support for Unicode identifiers, allowing the use of natural languages and emojis as variable names.
 
